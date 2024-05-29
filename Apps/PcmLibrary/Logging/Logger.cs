@@ -2,10 +2,7 @@
 
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace PcmHacking
@@ -54,11 +51,14 @@ namespace PcmHacking
         private readonly DpidConfiguration dpidConfiguration;
         private readonly MathValueProcessor mathValueProcessor;
         private DpidCollection dpids;
+        private CanLogger canLogger;
         private ILogger uiLogger;
 
         public DpidConfiguration DpidConfiguration {  get { return this.dpidConfiguration; } }
 
         public MathValueProcessor MathValueProcessor {  get { return this.mathValueProcessor; } }
+
+        public CanLogger CanLogger { get { return this.canLogger; } }
 
         protected Vehicle Vehicle { get { return this.vehicle; } }
 
@@ -71,6 +71,7 @@ namespace PcmHacking
         /// </summary>
         protected Logger(
             Vehicle vehicle, 
+            CanLogger canLogger,
             uint osid, 
             DpidConfiguration dpidConfiguration, 
             MathValueProcessor mathValueProcessor, 
@@ -81,6 +82,7 @@ namespace PcmHacking
             this.dpidConfiguration = dpidConfiguration;
             this.mathValueProcessor = mathValueProcessor;
             this.uiLogger = uiLogger;
+            this.canLogger = canLogger;
         }
 
         /// <summary>
@@ -92,6 +94,7 @@ namespace PcmHacking
             IEnumerable<LogColumn> columns, 
             bool deviceSupportsSingleDpid,
             bool deviceSupportsStreaming,
+            CanLogger canLogger,
             ILogger uiLogger)
         {
             DpidConfiguration dpidConfiguration = new DpidConfiguration();
@@ -227,6 +230,7 @@ namespace PcmHacking
             {
                 return new FastLogger(
                     vehicle,
+                    canLogger,
                     osid,
                     dpidConfiguration,
                     new MathValueProcessor(
@@ -238,6 +242,7 @@ namespace PcmHacking
             {
                 return new SlowLogger(
                     vehicle,
+                    canLogger,
                     osid,
                     dpidConfiguration,
                     new MathValueProcessor(
@@ -249,7 +254,10 @@ namespace PcmHacking
 
         public IEnumerable<string> GetColumnNames()
         {
-            return this.dpidConfiguration.GetParameterNames().Concat(this.mathValueProcessor.GetHeaderNames());
+            IEnumerable<string> columns = this.dpidConfiguration.GetParameterNames();
+            columns = columns.Concat(this.mathValueProcessor.GetHeaderNames());
+            columns = columns.Concat(this.canLogger.GetParameterNames());
+            return columns;
         }
 
         /// <summary>
@@ -288,10 +296,12 @@ namespace PcmHacking
                 PcmParameterValues dpidValues = row.Evaluate();
 
                 IEnumerable<string> mathValues = this.mathValueProcessor.GetMathValues(dpidValues);
+                IEnumerable<string> canValues = this.canLogger.GetParameterValues().Select(x => x.Value);
 
                 return dpidValues
                         .Select(x => x.Value.ValueAsString)
                         .Concat(mathValues)
+                        .Concat(canValues)
                         .ToArray();
             }
             else

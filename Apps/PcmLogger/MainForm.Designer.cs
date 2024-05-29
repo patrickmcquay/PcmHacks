@@ -7,9 +7,6 @@
         /// </summary>
         private System.ComponentModel.IContainer components = null;
 
-        private System.Windows.Forms.Button selectButton;
-        private System.Windows.Forms.Label deviceDescription;
-
         /// <summary>
         /// Clean up any resources being used.
         /// </summary>
@@ -33,8 +30,12 @@
         {
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(MainForm));
             this.loggerProgress = new System.Windows.Forms.ProgressBar();
+            this.dashboardTab = new System.Windows.Forms.TabPage();
+            this.startStopSaving = new System.Windows.Forms.Button();
+            this.splitContainer1 = new System.Windows.Forms.SplitContainer();
             this.tabs = new System.Windows.Forms.TabControl();
             this.configurationTab = new System.Windows.Forms.TabPage();
+            this.disclaimer = new System.Windows.Forms.Label();
             this.logFilePath = new System.Windows.Forms.Label();
             this.openDirectory = new System.Windows.Forms.Button();
             this.selectButton = new System.Windows.Forms.Button();
@@ -48,27 +49,33 @@
             this.saveAsButton = new System.Windows.Forms.Button();
             this.saveButton = new System.Windows.Forms.Button();
             this.parametersTab = new System.Windows.Forms.TabPage();
-            this.parametersSplitter = new System.Windows.Forms.SplitContainer();
             this.parameterSearch = new System.Windows.Forms.TextBox();
             this.parameterGrid = new System.Windows.Forms.DataGridView();
             this.enabledColumn = new System.Windows.Forms.DataGridViewCheckBoxColumn();
             this.nameColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.unitsColumn = new System.Windows.Forms.DataGridViewComboBoxColumn();
-            this.logValues = new System.Windows.Forms.TextBox();
+            this.canTab = new System.Windows.Forms.TabPage();
+            this.canParameterGrid = new System.Windows.Forms.DataGridView();
+            this.canParameterNameColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.canParameterUnitsColumn = new System.Windows.Forms.DataGridViewComboBoxColumn();
+            this.disableCanLogging = new System.Windows.Forms.RadioButton();
+            this.enableCanLogging = new System.Windows.Forms.RadioButton();
+            this.canDeviceDescription = new System.Windows.Forms.Label();
+            this.selectCanButton = new System.Windows.Forms.Button();
             this.debugTab = new System.Windows.Forms.TabPage();
             this.debugLog = new System.Windows.Forms.TextBox();
-            this.dashboardTab = new System.Windows.Forms.TabPage();
-            this.startStopSaving = new System.Windows.Forms.Button();
-            this.disclaimer = new System.Windows.Forms.Label();
+            this.logValues = new System.Windows.Forms.TextBox();
+            ((System.ComponentModel.ISupportInitialize)(this.splitContainer1)).BeginInit();
+            this.splitContainer1.Panel1.SuspendLayout();
+            this.splitContainer1.Panel2.SuspendLayout();
+            this.splitContainer1.SuspendLayout();
             this.tabs.SuspendLayout();
             this.configurationTab.SuspendLayout();
             this.profilesTab.SuspendLayout();
             this.parametersTab.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.parametersSplitter)).BeginInit();
-            this.parametersSplitter.Panel1.SuspendLayout();
-            this.parametersSplitter.Panel2.SuspendLayout();
-            this.parametersSplitter.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.parameterGrid)).BeginInit();
+            this.canTab.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.canParameterGrid)).BeginInit();
             this.debugTab.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -77,28 +84,70 @@
             this.loggerProgress.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.loggerProgress.Enabled = false;
-            this.loggerProgress.Location = new System.Drawing.Point(244, 11);
+            this.loggerProgress.Location = new System.Drawing.Point(325, 14);
+            this.loggerProgress.Margin = new System.Windows.Forms.Padding(4);
             this.loggerProgress.MarqueeAnimationSpeed = 0;
             this.loggerProgress.Name = "loggerProgress";
-            this.loggerProgress.Size = new System.Drawing.Size(519, 23);
+            this.loggerProgress.Size = new System.Drawing.Size(692, 58);
             this.loggerProgress.Step = 0;
             this.loggerProgress.Style = System.Windows.Forms.ProgressBarStyle.Marquee;
             this.loggerProgress.TabIndex = 5;
             this.loggerProgress.Visible = false;
             // 
-            // tabs
+            // dashboardTab
             // 
-            this.tabs.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            this.dashboardTab.Location = new System.Drawing.Point(4, 22);
+            this.dashboardTab.Name = "dashboardTab";
+            this.dashboardTab.Padding = new System.Windows.Forms.Padding(3);
+            this.dashboardTab.Size = new System.Drawing.Size(743, 427);
+            this.dashboardTab.TabIndex = 0;
+            this.dashboardTab.Text = "Dashboard";
+            this.dashboardTab.UseVisualStyleBackColor = true;
+            // 
+            // startStopSaving
+            // 
+            this.startStopSaving.Enabled = false;
+            this.startStopSaving.Location = new System.Drawing.Point(16, 14);
+            this.startStopSaving.Margin = new System.Windows.Forms.Padding(4);
+            this.startStopSaving.Name = "startStopSaving";
+            this.startStopSaving.Size = new System.Drawing.Size(287, 58);
+            this.startStopSaving.TabIndex = 4;
+            this.startStopSaving.Text = "Start &Recording";
+            this.startStopSaving.UseVisualStyleBackColor = true;
+            this.startStopSaving.Click += new System.EventHandler(this.startStopSaving_Click);
+            // 
+            // splitContainer1
+            // 
+            this.splitContainer1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
+            this.splitContainer1.Location = new System.Drawing.Point(0, 80);
+            this.splitContainer1.Name = "splitContainer1";
+            // 
+            // splitContainer1.Panel1
+            // 
+            this.splitContainer1.Panel1.Controls.Add(this.tabs);
+            // 
+            // splitContainer1.Panel2
+            // 
+            this.splitContainer1.Panel2.Controls.Add(this.logValues);
+            this.splitContainer1.Size = new System.Drawing.Size(1031, 543);
+            this.splitContainer1.SplitterDistance = 600;
+            this.splitContainer1.TabIndex = 9;
+            // 
+            // tabs
+            // 
             this.tabs.Controls.Add(this.configurationTab);
             this.tabs.Controls.Add(this.profilesTab);
             this.tabs.Controls.Add(this.parametersTab);
+            this.tabs.Controls.Add(this.canTab);
             this.tabs.Controls.Add(this.debugTab);
-            this.tabs.Location = new System.Drawing.Point(12, 40);
+            this.tabs.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.tabs.Location = new System.Drawing.Point(0, 0);
+            this.tabs.Margin = new System.Windows.Forms.Padding(4);
             this.tabs.Name = "tabs";
             this.tabs.SelectedIndex = 0;
-            this.tabs.Size = new System.Drawing.Size(751, 453);
+            this.tabs.Size = new System.Drawing.Size(600, 543);
             this.tabs.TabIndex = 8;
             // 
             // configurationTab
@@ -109,29 +158,42 @@
             this.configurationTab.Controls.Add(this.selectButton);
             this.configurationTab.Controls.Add(this.setDirectory);
             this.configurationTab.Controls.Add(this.deviceDescription);
-            this.configurationTab.Location = new System.Drawing.Point(4, 22);
-            this.configurationTab.Margin = new System.Windows.Forms.Padding(2);
+            this.configurationTab.Location = new System.Drawing.Point(4, 25);
+            this.configurationTab.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.configurationTab.Name = "configurationTab";
-            this.configurationTab.Size = new System.Drawing.Size(743, 427);
+            this.configurationTab.Size = new System.Drawing.Size(592, 514);
             this.configurationTab.TabIndex = 3;
             this.configurationTab.Text = "Configuration";
             this.configurationTab.UseVisualStyleBackColor = true;
+            // 
+            // disclaimer
+            // 
+            this.disclaimer.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.disclaimer.Location = new System.Drawing.Point(5, 178);
+            this.disclaimer.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.disclaimer.Name = "disclaimer";
+            this.disclaimer.Size = new System.Drawing.Size(584, 172);
+            this.disclaimer.TabIndex = 10;
+            this.disclaimer.Text = resources.GetString("disclaimer.Text");
             // 
             // logFilePath
             // 
             this.logFilePath.AutoSize = true;
             this.logFilePath.BackColor = System.Drawing.Color.Transparent;
-            this.logFilePath.Location = new System.Drawing.Point(115, 69);
+            this.logFilePath.Location = new System.Drawing.Point(153, 85);
+            this.logFilePath.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.logFilePath.Name = "logFilePath";
-            this.logFilePath.Size = new System.Drawing.Size(49, 13);
+            this.logFilePath.Size = new System.Drawing.Size(65, 17);
             this.logFilePath.TabIndex = 7;
             this.logFilePath.Text = "Directory";
             // 
             // openDirectory
             // 
-            this.openDirectory.Location = new System.Drawing.Point(4, 93);
+            this.openDirectory.Location = new System.Drawing.Point(5, 114);
+            this.openDirectory.Margin = new System.Windows.Forms.Padding(4);
             this.openDirectory.Name = "openDirectory";
-            this.openDirectory.Size = new System.Drawing.Size(104, 23);
+            this.openDirectory.Size = new System.Drawing.Size(139, 28);
             this.openDirectory.TabIndex = 9;
             this.openDirectory.Text = "&Open Log Folder";
             this.openDirectory.UseVisualStyleBackColor = true;
@@ -139,19 +201,21 @@
             // 
             // selectButton
             // 
-            this.selectButton.Location = new System.Drawing.Point(3, 3);
+            this.selectButton.Location = new System.Drawing.Point(4, 4);
+            this.selectButton.Margin = new System.Windows.Forms.Padding(4);
             this.selectButton.Name = "selectButton";
-            this.selectButton.Size = new System.Drawing.Size(216, 25);
+            this.selectButton.Size = new System.Drawing.Size(288, 31);
             this.selectButton.TabIndex = 0;
-            this.selectButton.Text = "&Select Device";
+            this.selectButton.Text = "&Select OBD2 Device";
             this.selectButton.UseVisualStyleBackColor = true;
             this.selectButton.Click += new System.EventHandler(this.selectButton_Click);
             // 
             // setDirectory
             // 
-            this.setDirectory.Location = new System.Drawing.Point(4, 64);
+            this.setDirectory.Location = new System.Drawing.Point(5, 79);
+            this.setDirectory.Margin = new System.Windows.Forms.Padding(4);
             this.setDirectory.Name = "setDirectory";
-            this.setDirectory.Size = new System.Drawing.Size(105, 23);
+            this.setDirectory.Size = new System.Drawing.Size(140, 28);
             this.setDirectory.TabIndex = 6;
             this.setDirectory.Text = "Set Log &Folder";
             this.setDirectory.UseVisualStyleBackColor = true;
@@ -160,9 +224,10 @@
             // deviceDescription
             // 
             this.deviceDescription.AutoSize = true;
-            this.deviceDescription.Location = new System.Drawing.Point(225, 9);
+            this.deviceDescription.Location = new System.Drawing.Point(300, 11);
+            this.deviceDescription.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.deviceDescription.Name = "deviceDescription";
-            this.deviceDescription.Size = new System.Drawing.Size(88, 13);
+            this.deviceDescription.Size = new System.Drawing.Size(114, 17);
             this.deviceDescription.TabIndex = 1;
             this.deviceDescription.Text = "[selected device]";
             // 
@@ -174,10 +239,10 @@
             this.profilesTab.Controls.Add(this.profileList);
             this.profilesTab.Controls.Add(this.saveAsButton);
             this.profilesTab.Controls.Add(this.saveButton);
-            this.profilesTab.Location = new System.Drawing.Point(4, 22);
-            this.profilesTab.Margin = new System.Windows.Forms.Padding(2);
+            this.profilesTab.Location = new System.Drawing.Point(4, 25);
+            this.profilesTab.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.profilesTab.Name = "profilesTab";
-            this.profilesTab.Size = new System.Drawing.Size(743, 427);
+            this.profilesTab.Size = new System.Drawing.Size(592, 514);
             this.profilesTab.TabIndex = 4;
             this.profilesTab.Text = "Profiles";
             this.profilesTab.UseVisualStyleBackColor = true;
@@ -185,10 +250,10 @@
             // removeProfileButton
             // 
             this.removeProfileButton.Enabled = false;
-            this.removeProfileButton.Location = new System.Drawing.Point(666, 3);
-            this.removeProfileButton.Margin = new System.Windows.Forms.Padding(2);
+            this.removeProfileButton.Location = new System.Drawing.Point(888, 4);
+            this.removeProfileButton.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.removeProfileButton.Name = "removeProfileButton";
-            this.removeProfileButton.Size = new System.Drawing.Size(75, 25);
+            this.removeProfileButton.Size = new System.Drawing.Size(100, 31);
             this.removeProfileButton.TabIndex = 5;
             this.removeProfileButton.Text = "&Remove";
             this.removeProfileButton.UseVisualStyleBackColor = true;
@@ -196,10 +261,10 @@
             // 
             // openButton
             // 
-            this.openButton.Location = new System.Drawing.Point(82, 2);
-            this.openButton.Margin = new System.Windows.Forms.Padding(2);
+            this.openButton.Location = new System.Drawing.Point(109, 2);
+            this.openButton.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.openButton.Name = "openButton";
-            this.openButton.Size = new System.Drawing.Size(75, 25);
+            this.openButton.Size = new System.Drawing.Size(100, 31);
             this.openButton.TabIndex = 4;
             this.openButton.Text = "&Open";
             this.openButton.UseVisualStyleBackColor = true;
@@ -207,10 +272,10 @@
             // 
             // newButton
             // 
-            this.newButton.Location = new System.Drawing.Point(2, 2);
-            this.newButton.Margin = new System.Windows.Forms.Padding(2);
+            this.newButton.Location = new System.Drawing.Point(3, 2);
+            this.newButton.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.newButton.Name = "newButton";
-            this.newButton.Size = new System.Drawing.Size(75, 25);
+            this.newButton.Size = new System.Drawing.Size(100, 31);
             this.newButton.TabIndex = 3;
             this.newButton.Text = "&New";
             this.newButton.UseVisualStyleBackColor = true;
@@ -222,19 +287,21 @@
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.profileList.FormattingEnabled = true;
-            this.profileList.Location = new System.Drawing.Point(2, 32);
-            this.profileList.Margin = new System.Windows.Forms.Padding(2);
+            this.profileList.IntegralHeight = false;
+            this.profileList.ItemHeight = 16;
+            this.profileList.Location = new System.Drawing.Point(3, 39);
+            this.profileList.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.profileList.Name = "profileList";
-            this.profileList.Size = new System.Drawing.Size(739, 394);
+            this.profileList.Size = new System.Drawing.Size(583, 469);
             this.profileList.TabIndex = 2;
             this.profileList.SelectedIndexChanged += new System.EventHandler(this.profileList_SelectedIndexChanged);
             // 
             // saveAsButton
             // 
-            this.saveAsButton.Location = new System.Drawing.Point(241, 2);
-            this.saveAsButton.Margin = new System.Windows.Forms.Padding(2);
+            this.saveAsButton.Location = new System.Drawing.Point(321, 2);
+            this.saveAsButton.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.saveAsButton.Name = "saveAsButton";
-            this.saveAsButton.Size = new System.Drawing.Size(75, 25);
+            this.saveAsButton.Size = new System.Drawing.Size(100, 31);
             this.saveAsButton.TabIndex = 1;
             this.saveAsButton.Text = "Save &As";
             this.saveAsButton.UseVisualStyleBackColor = true;
@@ -242,10 +309,10 @@
             // 
             // saveButton
             // 
-            this.saveButton.Location = new System.Drawing.Point(161, 2);
-            this.saveButton.Margin = new System.Windows.Forms.Padding(2);
+            this.saveButton.Location = new System.Drawing.Point(215, 2);
+            this.saveButton.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.saveButton.Name = "saveButton";
-            this.saveButton.Size = new System.Drawing.Size(75, 25);
+            this.saveButton.Size = new System.Drawing.Size(100, 31);
             this.saveButton.TabIndex = 0;
             this.saveButton.Text = "&Save";
             this.saveButton.UseVisualStyleBackColor = true;
@@ -253,41 +320,24 @@
             // 
             // parametersTab
             // 
-            this.parametersTab.Controls.Add(this.parametersSplitter);
-            this.parametersTab.Location = new System.Drawing.Point(4, 22);
-            this.parametersTab.Margin = new System.Windows.Forms.Padding(2);
+            this.parametersTab.Controls.Add(this.parameterSearch);
+            this.parametersTab.Controls.Add(this.parameterGrid);
+            this.parametersTab.Location = new System.Drawing.Point(4, 25);
+            this.parametersTab.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.parametersTab.Name = "parametersTab";
-            this.parametersTab.Size = new System.Drawing.Size(743, 427);
+            this.parametersTab.Size = new System.Drawing.Size(592, 514);
             this.parametersTab.TabIndex = 2;
             this.parametersTab.Text = "Parameters";
             this.parametersTab.UseVisualStyleBackColor = true;
-            // 
-            // parametersSplitter
-            // 
-            this.parametersSplitter.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.parametersSplitter.Location = new System.Drawing.Point(0, 0);
-            this.parametersSplitter.Name = "parametersSplitter";
-            // 
-            // parametersSplitter.Panel1
-            // 
-            this.parametersSplitter.Panel1.Controls.Add(this.parameterSearch);
-            this.parametersSplitter.Panel1.Controls.Add(this.parameterGrid);
-            this.parametersSplitter.Panel1MinSize = 200;
-            // 
-            // parametersSplitter.Panel2
-            // 
-            this.parametersSplitter.Panel2.Controls.Add(this.logValues);
-            this.parametersSplitter.Size = new System.Drawing.Size(743, 427);
-            this.parametersSplitter.SplitterDistance = 400;
-            this.parametersSplitter.TabIndex = 1;
             // 
             // parameterSearch
             // 
             this.parameterSearch.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.parameterSearch.Location = new System.Drawing.Point(3, 3);
+            this.parameterSearch.Location = new System.Drawing.Point(4, 4);
+            this.parameterSearch.Margin = new System.Windows.Forms.Padding(4);
             this.parameterSearch.Name = "parameterSearch";
-            this.parameterSearch.Size = new System.Drawing.Size(394, 20);
+            this.parameterSearch.Size = new System.Drawing.Size(584, 22);
             this.parameterSearch.TabIndex = 1;
             this.parameterSearch.TextChanged += new System.EventHandler(this.parameterSearch_TextChanged);
             this.parameterSearch.Enter += new System.EventHandler(this.parameterSearch_Enter);
@@ -308,19 +358,21 @@
             this.enabledColumn,
             this.nameColumn,
             this.unitsColumn});
-            this.parameterGrid.Location = new System.Drawing.Point(0, 28);
-            this.parameterGrid.Margin = new System.Windows.Forms.Padding(2);
+            this.parameterGrid.Location = new System.Drawing.Point(0, 34);
+            this.parameterGrid.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.parameterGrid.Name = "parameterGrid";
             this.parameterGrid.RowHeadersVisible = false;
+            this.parameterGrid.RowHeadersWidth = 51;
             this.parameterGrid.RowTemplate.Height = 24;
             this.parameterGrid.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.parameterGrid.ShowCellErrors = false;
             this.parameterGrid.ShowEditingIcon = false;
             this.parameterGrid.ShowRowErrors = false;
-            this.parameterGrid.Size = new System.Drawing.Size(400, 399);
+            this.parameterGrid.Size = new System.Drawing.Size(589, 478);
             this.parameterGrid.TabIndex = 0;
             this.parameterGrid.CellContentClick += new System.Windows.Forms.DataGridViewCellEventHandler(this.parameterGrid_CellContentClick);
             this.parameterGrid.CellValueChanged += new System.Windows.Forms.DataGridViewCellEventHandler(this.parameterGrid_CellValueChanged);
+            this.parameterGrid.CurrentCellDirtyStateChanged += new System.EventHandler(this.parameterGrid_CurrentCellDirtyStateChanged);
             // 
             // enabledColumn
             // 
@@ -329,7 +381,8 @@
             this.enabledColumn.HeaderText = "Enabled";
             this.enabledColumn.MinimumWidth = 50;
             this.enabledColumn.Name = "enabledColumn";
-            this.enabledColumn.Width = 52;
+            this.enabledColumn.SortMode = System.Windows.Forms.DataGridViewColumnSortMode.Automatic;
+            this.enabledColumn.Width = 89;
             // 
             // nameColumn
             // 
@@ -347,23 +400,117 @@
             this.unitsColumn.MinimumWidth = 100;
             this.unitsColumn.Name = "unitsColumn";
             // 
-            // logValues
+            // canTab
             // 
-            this.logValues.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.logValues.Location = new System.Drawing.Point(0, 0);
-            this.logValues.Multiline = true;
-            this.logValues.Name = "logValues";
-            this.logValues.ReadOnly = true;
-            this.logValues.Size = new System.Drawing.Size(339, 427);
-            this.logValues.TabIndex = 0;
+            this.canTab.Controls.Add(this.canParameterGrid);
+            this.canTab.Controls.Add(this.disableCanLogging);
+            this.canTab.Controls.Add(this.enableCanLogging);
+            this.canTab.Controls.Add(this.canDeviceDescription);
+            this.canTab.Controls.Add(this.selectCanButton);
+            this.canTab.Location = new System.Drawing.Point(4, 25);
+            this.canTab.Name = "canTab";
+            this.canTab.Size = new System.Drawing.Size(592, 514);
+            this.canTab.TabIndex = 5;
+            this.canTab.Text = "CAN Bus";
+            this.canTab.UseVisualStyleBackColor = true;
+            // 
+            // canParameterGrid
+            // 
+            this.canParameterGrid.AllowUserToAddRows = false;
+            this.canParameterGrid.AllowUserToDeleteRows = false;
+            this.canParameterGrid.AllowUserToResizeRows = false;
+            this.canParameterGrid.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.canParameterGrid.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.canParameterGrid.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
+            this.canParameterNameColumn,
+            this.canParameterUnitsColumn});
+            this.canParameterGrid.EditMode = System.Windows.Forms.DataGridViewEditMode.EditOnEnter;
+            this.canParameterGrid.Location = new System.Drawing.Point(3, 63);
+            this.canParameterGrid.MultiSelect = false;
+            this.canParameterGrid.Name = "canParameterGrid";
+            this.canParameterGrid.RowHeadersVisible = false;
+            this.canParameterGrid.RowHeadersWidth = 51;
+            this.canParameterGrid.RowTemplate.Height = 24;
+            this.canParameterGrid.Size = new System.Drawing.Size(586, 448);
+            this.canParameterGrid.TabIndex = 17;
+            this.canParameterGrid.CellValueChanged += new System.Windows.Forms.DataGridViewCellEventHandler(this.canParameterGrid_CellValueChanged);
+            this.canParameterGrid.CurrentCellDirtyStateChanged += new System.EventHandler(this.canParameterGrid_CurrentCellDirtyStateChanged);
+            this.canParameterGrid.DataError += new System.Windows.Forms.DataGridViewDataErrorEventHandler(this.canParameterGrid_DataError);
+            // 
+            // canParameterNameColumn
+            // 
+            this.canParameterNameColumn.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+            this.canParameterNameColumn.HeaderText = "Parameter Name";
+            this.canParameterNameColumn.MinimumWidth = 200;
+            this.canParameterNameColumn.Name = "canParameterNameColumn";
+            this.canParameterNameColumn.ReadOnly = true;
+            this.canParameterNameColumn.Resizable = System.Windows.Forms.DataGridViewTriState.False;
+            // 
+            // canParameterUnitsColumn
+            // 
+            this.canParameterUnitsColumn.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+            this.canParameterUnitsColumn.FillWeight = 15F;
+            this.canParameterUnitsColumn.HeaderText = "Units";
+            this.canParameterUnitsColumn.MinimumWidth = 125;
+            this.canParameterUnitsColumn.Name = "canParameterUnitsColumn";
+            // 
+            // disableCanLogging
+            // 
+            this.disableCanLogging.AutoSize = true;
+            this.disableCanLogging.Checked = true;
+            this.disableCanLogging.Location = new System.Drawing.Point(4, 30);
+            this.disableCanLogging.Name = "disableCanLogging";
+            this.disableCanLogging.Size = new System.Drawing.Size(163, 21);
+            this.disableCanLogging.TabIndex = 16;
+            this.disableCanLogging.TabStop = true;
+            this.disableCanLogging.Text = "&Disable CAN Logging";
+            this.disableCanLogging.UseVisualStyleBackColor = true;
+            this.disableCanLogging.CheckedChanged += new System.EventHandler(this.disableCanLogging_CheckedChanged);
+            // 
+            // enableCanLogging
+            // 
+            this.enableCanLogging.AutoSize = true;
+            this.enableCanLogging.Location = new System.Drawing.Point(4, 4);
+            this.enableCanLogging.Name = "enableCanLogging";
+            this.enableCanLogging.Size = new System.Drawing.Size(160, 21);
+            this.enableCanLogging.TabIndex = 15;
+            this.enableCanLogging.Text = "&Enable CAN Logging";
+            this.enableCanLogging.UseVisualStyleBackColor = true;
+            this.enableCanLogging.CheckedChanged += new System.EventHandler(this.enableCanLogging_CheckedChanged);
+            // 
+            // canDeviceDescription
+            // 
+            this.canDeviceDescription.AutoSize = true;
+            this.canDeviceDescription.Enabled = false;
+            this.canDeviceDescription.Location = new System.Drawing.Point(373, 32);
+            this.canDeviceDescription.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.canDeviceDescription.Name = "canDeviceDescription";
+            this.canDeviceDescription.Size = new System.Drawing.Size(114, 17);
+            this.canDeviceDescription.TabIndex = 14;
+            this.canDeviceDescription.Text = "[selected device]";
+            // 
+            // selectCanButton
+            // 
+            this.selectCanButton.Enabled = false;
+            this.selectCanButton.Location = new System.Drawing.Point(199, 25);
+            this.selectCanButton.Margin = new System.Windows.Forms.Padding(4);
+            this.selectCanButton.Name = "selectCanButton";
+            this.selectCanButton.Size = new System.Drawing.Size(166, 31);
+            this.selectCanButton.TabIndex = 13;
+            this.selectCanButton.Text = "Select &CAN Device";
+            this.selectCanButton.UseVisualStyleBackColor = true;
+            this.selectCanButton.Click += new System.EventHandler(this.selectCanButton_Click);
             // 
             // debugTab
             // 
             this.debugTab.Controls.Add(this.debugLog);
-            this.debugTab.Location = new System.Drawing.Point(4, 22);
+            this.debugTab.Location = new System.Drawing.Point(4, 25);
+            this.debugTab.Margin = new System.Windows.Forms.Padding(4);
             this.debugTab.Name = "debugTab";
-            this.debugTab.Padding = new System.Windows.Forms.Padding(3);
-            this.debugTab.Size = new System.Drawing.Size(743, 427);
+            this.debugTab.Padding = new System.Windows.Forms.Padding(4);
+            this.debugTab.Size = new System.Drawing.Size(592, 514);
             this.debugTab.TabIndex = 1;
             this.debugTab.Text = "Debug";
             this.debugTab.UseVisualStyleBackColor = true;
@@ -371,69 +518,54 @@
             // debugLog
             // 
             this.debugLog.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.debugLog.Location = new System.Drawing.Point(3, 3);
+            this.debugLog.Location = new System.Drawing.Point(4, 4);
+            this.debugLog.Margin = new System.Windows.Forms.Padding(4);
             this.debugLog.Multiline = true;
             this.debugLog.Name = "debugLog";
             this.debugLog.ReadOnly = true;
             this.debugLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.debugLog.Size = new System.Drawing.Size(737, 421);
+            this.debugLog.Size = new System.Drawing.Size(584, 506);
             this.debugLog.TabIndex = 0;
             // 
-            // dashboardTab
+            // logValues
             // 
-            this.dashboardTab.Location = new System.Drawing.Point(4, 22);
-            this.dashboardTab.Name = "dashboardTab";
-            this.dashboardTab.Padding = new System.Windows.Forms.Padding(3);
-            this.dashboardTab.Size = new System.Drawing.Size(743, 427);
-            this.dashboardTab.TabIndex = 0;
-            this.dashboardTab.Text = "Dashboard";
-            this.dashboardTab.UseVisualStyleBackColor = true;
-            // 
-            // startStopSaving
-            // 
-            this.startStopSaving.Enabled = false;
-            this.startStopSaving.Location = new System.Drawing.Point(12, 11);
-            this.startStopSaving.Name = "startStopSaving";
-            this.startStopSaving.Size = new System.Drawing.Size(215, 23);
-            this.startStopSaving.TabIndex = 4;
-            this.startStopSaving.Text = "Start &Recording";
-            this.startStopSaving.UseVisualStyleBackColor = true;
-            this.startStopSaving.Click += new System.EventHandler(this.startStopSaving_Click);
-            // 
-            // disclaimer
-            // 
-            this.disclaimer.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.disclaimer.Location = new System.Drawing.Point(4, 145);
-            this.disclaimer.Name = "disclaimer";
-            this.disclaimer.Size = new System.Drawing.Size(739, 140);
-            this.disclaimer.TabIndex = 10;
-            this.disclaimer.Text = resources.GetString("disclaimer.Text");
+            this.logValues.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.logValues.Location = new System.Drawing.Point(0, 0);
+            this.logValues.Margin = new System.Windows.Forms.Padding(4);
+            this.logValues.Multiline = true;
+            this.logValues.Name = "logValues";
+            this.logValues.ReadOnly = true;
+            this.logValues.Size = new System.Drawing.Size(427, 543);
+            this.logValues.TabIndex = 0;
             // 
             // MainForm
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(775, 505);
+            this.ClientSize = new System.Drawing.Size(1033, 622);
+            this.Controls.Add(this.splitContainer1);
             this.Controls.Add(this.loggerProgress);
-            this.Controls.Add(this.tabs);
             this.Controls.Add(this.startStopSaving);
+            this.Margin = new System.Windows.Forms.Padding(4);
             this.Name = "MainForm";
             this.Text = "(window title is set programmatically)";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.MainForm_FormClosing);
             this.Load += new System.EventHandler(this.MainForm_Load);
+            this.splitContainer1.Panel1.ResumeLayout(false);
+            this.splitContainer1.Panel2.ResumeLayout(false);
+            this.splitContainer1.Panel2.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.splitContainer1)).EndInit();
+            this.splitContainer1.ResumeLayout(false);
             this.tabs.ResumeLayout(false);
             this.configurationTab.ResumeLayout(false);
             this.configurationTab.PerformLayout();
             this.profilesTab.ResumeLayout(false);
             this.parametersTab.ResumeLayout(false);
-            this.parametersSplitter.Panel1.ResumeLayout(false);
-            this.parametersSplitter.Panel1.PerformLayout();
-            this.parametersSplitter.Panel2.ResumeLayout(false);
-            this.parametersSplitter.Panel2.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.parametersSplitter)).EndInit();
-            this.parametersSplitter.ResumeLayout(false);
+            this.parametersTab.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.parameterGrid)).EndInit();
+            this.canTab.ResumeLayout(false);
+            this.canTab.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.canParameterGrid)).EndInit();
             this.debugTab.ResumeLayout(false);
             this.debugTab.PerformLayout();
             this.ResumeLayout(false);
@@ -443,31 +575,41 @@
         #endregion
 
         private System.Windows.Forms.Button startStopSaving;
-        private System.Windows.Forms.TabControl tabs;
         private System.Windows.Forms.TabPage dashboardTab;
-        private System.Windows.Forms.TabPage debugTab;
-        private System.Windows.Forms.TextBox logValues;
-        private System.Windows.Forms.TextBox debugLog;
         private System.Windows.Forms.ProgressBar loggerProgress;
-        private System.Windows.Forms.Label logFilePath;
-        private System.Windows.Forms.Button setDirectory;
-        private System.Windows.Forms.Button openDirectory;
+        private System.Windows.Forms.SplitContainer splitContainer1;
+        private System.Windows.Forms.TabPage debugTab;
+        private System.Windows.Forms.TextBox debugLog;
+        private System.Windows.Forms.TabPage canTab;
+        private System.Windows.Forms.DataGridView canParameterGrid;
+        private System.Windows.Forms.DataGridViewTextBoxColumn canParameterNameColumn;
+        private System.Windows.Forms.DataGridViewComboBoxColumn canParameterUnitsColumn;
+        private System.Windows.Forms.RadioButton disableCanLogging;
+        private System.Windows.Forms.RadioButton enableCanLogging;
+        private System.Windows.Forms.Label canDeviceDescription;
+        private System.Windows.Forms.Button selectCanButton;
         private System.Windows.Forms.TabPage parametersTab;
+        private System.Windows.Forms.TextBox parameterSearch;
         private System.Windows.Forms.DataGridView parameterGrid;
-        private System.Windows.Forms.TabPage configurationTab;
+        private System.Windows.Forms.DataGridViewCheckBoxColumn enabledColumn;
+        private System.Windows.Forms.DataGridViewTextBoxColumn nameColumn;
+        private System.Windows.Forms.DataGridViewComboBoxColumn unitsColumn;
+        private System.Windows.Forms.TextBox logValues;
         private System.Windows.Forms.TabPage profilesTab;
+        private System.Windows.Forms.Button removeProfileButton;
+        private System.Windows.Forms.Button openButton;
         private System.Windows.Forms.Button newButton;
         private System.Windows.Forms.ListBox profileList;
         private System.Windows.Forms.Button saveAsButton;
         private System.Windows.Forms.Button saveButton;
-        private System.Windows.Forms.Button openButton;
-        private System.Windows.Forms.DataGridViewCheckBoxColumn enabledColumn;
-        private System.Windows.Forms.DataGridViewTextBoxColumn nameColumn;
-        private System.Windows.Forms.DataGridViewComboBoxColumn unitsColumn;
-        private System.Windows.Forms.SplitContainer parametersSplitter;
-        private System.Windows.Forms.TextBox parameterSearch;
-        private System.Windows.Forms.Button removeProfileButton;
+        private System.Windows.Forms.TabPage configurationTab;
         private System.Windows.Forms.Label disclaimer;
+        private System.Windows.Forms.Label logFilePath;
+        private System.Windows.Forms.Button openDirectory;
+        private System.Windows.Forms.Button selectButton;
+        private System.Windows.Forms.Button setDirectory;
+        private System.Windows.Forms.Label deviceDescription;
+        private System.Windows.Forms.TabControl tabs;
     }
 }
 

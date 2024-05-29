@@ -15,6 +15,21 @@ namespace PcmHacking
         private string pathToXmlDirectory;
 
         private List<Parameter> parameters = new List<Parameter>();
+        private Dictionary<UInt32, IEnumerable<CanParameter>> canParameters = new Dictionary<UInt32, IEnumerable<CanParameter>>();
+
+        public IEnumerable<CanParameter> CanParameters
+        {
+            get
+            {
+                foreach(IEnumerable<CanParameter> parameterSet in canParameters.Values)
+                {
+                    foreach(CanParameter parameter in parameterSet)
+                    {
+                        yield return parameter;
+                    }
+                }
+            }
+        }
 
         /// <summary>
         /// Constructor
@@ -25,16 +40,17 @@ namespace PcmHacking
         }
 
         /// <summary>
-        ///Gets a parameter using the specified generic type, with the specified id. Will throw if a parameter is not found.
+        /// Gets a parameter using the specified generic type, with the specified id.
         /// </summary>
         /// <typeparam name="T">The type of parameter, must be subclass of Parameter</typeparam>
         /// <param name="id">the string ID of the parameter to look for</param>
         /// <returns>The parameter, if found.</returns>
-        public T GetParameter<T>(string id) where T : Parameter
+        public bool TryGetParameter<T>(string id, out T result) where T : Parameter
         {
             try
             {
-                return this.parameters.First(p => p is T && p.Id == id) as T;
+                result = this.parameters.First(p => p is T && p.Id == id) as T;
+                return true;
             }
             catch(InvalidOperationException)
             {
@@ -42,15 +58,21 @@ namespace PcmHacking
                 if (typeof(T) == typeof(PidParameter) &&
                     uint.TryParse(id, System.Globalization.NumberStyles.HexNumber, CultureInfo.InvariantCulture, out pid))
                 {
-                    var result = this.parameters.FirstOrDefault(p => (p as PidParameter)?.PID == pid);
+                    result = (T) this.parameters.FirstOrDefault(p => (p as PidParameter)?.PID == pid);
                     if (result != null)
                     {
-                        return result as T;
+                        return true;
                     }                    
                 }
 
-                throw new Exception($"Unable to find matching parameter for ${typeof(T).Name} '{id}'");
+                result = null;
+                return false;
             }
+        }
+
+        public IReadOnlyDictionary<UInt32, IEnumerable<CanParameter>> GetCanParameters()
+        {
+            return this.canParameters;
         }
 
         /// <summary>
@@ -63,7 +85,6 @@ namespace PcmHacking
             return this.parameters.Where(p => p.IsSupported(osId));
         }
 
-
         /// <summary>
         /// adds a parameter to the database, will not allow parameters with duplicate IDs, throws exception in that case.
         /// </summary>
@@ -72,7 +93,7 @@ namespace PcmHacking
         {
             if (this.parameters.Any(P => P.Id == parameter.Id))
             {
-                throw new Exception(String.Format("Duplicate parameter ID:{0}", parameter.Id));
+                throw new Exception(String.Format("Duplicate parameter ID: {0}", parameter.Id));
             }
 
             this.parameters.Add(parameter);
@@ -86,6 +107,7 @@ namespace PcmHacking
             this.LoadStandardParameters();
             this.LoadRamParameters();
             this.LoadMathParameters();
+            this.LoadCanParameters();
         }
 
         /// <summary>
@@ -199,6 +221,38 @@ namespace PcmHacking
                     yLogColumn);
 
                 AddParameter(parameter);
+            }
+        }
+
+        private void LoadCanParameters()
+        {
+            string pathToXml = Path.Combine(this.pathToXmlDirectory, "Parameters.CAN.xml");
+            XDocument xml = XDocument.Load (pathToXml);
+            foreach (XElement messageElement in xml.Root.Elements("Message"))
+            {
+                string messageIdString = messageElement.Attribute("id").Value;
+                UInt32 messageId = UInt32.Parse(messageIdString, NumberStyles.HexNumber);
+
+                List<CanParameter> parameters = new List<CanParameter>();
+
+                foreach (XElement parameterElement in messageElement.Elements("Parameter"))
+                {
+                    string id = parameterElement.Attribute("id").Value;
+                    string name = parameterElement.Attribute("name").Value;
+                    string description = parameterElement.Attribute("description").Value;
+
+                    uint firstByte = uint.Parse(parameterElement.Attribute("firstByte").Value);
+                    uint byteCount = uint.Parse(parameterElement.Attribute("byteCount").Value);
+                    bool highByteFirst = bool.Parse(parameterElement.Attribute("highByteFirst").Value);
+
+                    List<Conversion> conversions = GetConversions(parameterElement);
+
+                    CanParameter parameter = new CanParameter(messageId, firstByte, byteCount, highByteFirst, id, name, description, conversions);
+
+                    parameters.Add(parameter);
+                }
+
+                this.canParameters[messageId] = parameters;
             }
         }
 
