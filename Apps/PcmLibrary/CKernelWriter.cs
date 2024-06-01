@@ -78,15 +78,19 @@ namespace PcmHacking
 
                     await this.vehicle.SendToolPresentNotification();
 
-                    Response<byte[]> response;
+                    byte[] file;
 
                     // Execute kernel loader, if required
                     if (this.pcmInfo.LoaderRequired)
                     {
-                        response = await vehicle.LoadKernelFromFile(this.pcmInfo.LoaderFileName);
-                        if (response.Status != ResponseStatus.Success)
+                        try
+                        {
+                            file = await vehicle.LoadKernelFromFile(this.pcmInfo.LoaderFileName);
+                        }
+                        catch (Exception exception)
                         {
                             logger.AddUserMessage("Failed to load loader from file.");
+                            logger.AddUserMessage(exception.Message);
                             return false;
                         }
 
@@ -97,7 +101,7 @@ namespace PcmHacking
 
                         await this.vehicle.SendToolPresentNotification();
 
-                        if (!await this.vehicle.PCMExecute(this.pcmInfo, response.Value, cancellationToken))
+                        if (!await this.vehicle.PCMExecute(this.pcmInfo, file, cancellationToken))
                         {
                             logger.AddUserMessage("Failed to upload loader to PCM");
 
@@ -107,10 +111,14 @@ namespace PcmHacking
                         logger.AddUserMessage("Loader uploaded to PCM succesfully.");
                     }
 
-                    response = await this.vehicle.LoadKernelFromFile(this.pcmInfo.KernelFileName);
-                    if (response.Status != ResponseStatus.Success)
+                    try
                     {
+                        file = await this.vehicle.LoadKernelFromFile(this.pcmInfo.KernelFileName);
+                    }
+                    catch (Exception exception)
+                    { 
                         logger.AddUserMessage("Failed to load kernel from file.");
+                        logger.AddUserMessage(exception.Message);
                         return false;
                     }
 
@@ -119,7 +127,7 @@ namespace PcmHacking
                         return false;
                     }
 
-                    if (!await this.vehicle.PCMExecute(this.pcmInfo, response.Value, cancellationToken))
+                    if (!await this.vehicle.PCMExecute(this.pcmInfo, file, cancellationToken))
                     {
                         logger.AddUserMessage("Failed to upload kernel to PCM");
 

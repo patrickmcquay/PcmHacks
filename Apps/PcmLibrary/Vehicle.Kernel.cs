@@ -76,68 +76,38 @@ namespace PcmHacking
         /// <summary>
         /// Opens the named kernel file. The file must be in the same directory as the EXE.
         /// </summary>
-        public async Task<Response<byte[]>> LoadKernelFromFile(string path)
+        public async Task<byte[]> LoadKernelFromFile(string path)
         {
             byte[] file = { 0x00 }; // dummy value
 
             if (path == "")
             {
-                return Response.Create(ResponseStatus.Error, file);
+                throw new InvalidOperationException("File name not provided.");
             }
 
             string exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
             string exeDirectory = Path.GetDirectoryName(exePath);
             path = Path.Combine(exeDirectory, path);
 
-            try
+            using (Stream fileStream = File.OpenRead(path))
             {
-                using (Stream fileStream = File.OpenRead(path))
+                if (fileStream.Length == 0)
                 {
-                    if (fileStream.Length == 0)
-                    {
-                        logger.AddDebugMessage("invalid kernel image (zero bytes). " + path);
-                        return Response.Create(ResponseStatus.Error, file);
-                    }
-                    file = new byte[fileStream.Length];
-
-                    // In theory we might need a loop here. In practice, I don't think that will be necessary.
-                    int bytesRead = await fileStream.ReadAsync(file, 0, (int)fileStream.Length);
-
-                    if(bytesRead != fileStream.Length)
-                    {
-                        return Response.Create(ResponseStatus.Truncated, file);
-                    }
+                    throw new InvalidDataException("invalid kernel image (zero bytes). " + path);
                 }
+                file = new byte[fileStream.Length];
 
-                logger.AddDebugMessage("Loaded " + path);
-            }
-            catch (ArgumentException)
-            {
-                logger.AddDebugMessage("Invalid file path " + path);
-                return Response.Create(ResponseStatus.Error, file);
-            }
-            catch (PathTooLongException)
-            {
-                logger.AddDebugMessage("File path is too long " + path);
-                return Response.Create(ResponseStatus.Error, file);
-            }
-            catch (DirectoryNotFoundException)
-            {
-                logger.AddDebugMessage("Invalid directory " + path);
-                return Response.Create(ResponseStatus.Error, file);
-            }
-            catch (IOException)
-            {
-                logger.AddDebugMessage("Error accessing file " + path);
-                return Response.Create(ResponseStatus.Error, file);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                logger.AddDebugMessage("No permission to read file " + path);
-                return Response.Create(ResponseStatus.Error, file);
+                // In theory we might need a loop here. In practice, I don't think that will be necessary.
+                int bytesRead = await fileStream.ReadAsync(file, 0, (int)fileStream.Length);
+
+                if(bytesRead != fileStream.Length)
+                {
+                    throw new InvalidDataException("Unable to read entire file.");
+                }
             }
 
-            return Response.Create(ResponseStatus.Success, file);
+            logger.AddDebugMessage("Loaded " + path);
+            return file;
         }
 
         /// <summary>

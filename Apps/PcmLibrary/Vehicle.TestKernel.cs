@@ -57,10 +57,16 @@ namespace PcmHacking
             {
                 this.device.ClearMessageQueue();
 
-                Response<byte[]> response = await LoadKernelFromFile("test-kernel.bin");
-                if (response.Status != ResponseStatus.Success)
+                byte[] file;
+                try
+                {
+                    file = await LoadKernelFromFile("test-kernel.bin");
+                }
+                catch (Exception exception)
                 {
                     // The cleanup code in the finally block will exit the kernel.
+                    // Don't log anything here - for most users there won't be a test kernel and that's okay.
+                    logger.AddUserMessage(exception.Message);
                     return true;
                 }
 
@@ -100,7 +106,7 @@ namespace PcmHacking
                 }
 
                 PcmInfo info = new PcmInfo(12202088); // todo, make selectable
-                if (!await PCMExecute(info, response.Value, cancellationToken))
+                if (!await PCMExecute(info, file, cancellationToken))
                 {
                     logger.AddUserMessage("Failed to upload kernel to PCM");
 
