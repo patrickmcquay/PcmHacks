@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text;
 
 namespace PcmHacking
@@ -87,47 +88,41 @@ namespace PcmHacking
         /// <summary>
         /// Parse the response to a request for permission to upload a RAM kernel (or part of a kernel).
         /// </summary>
-        public Response<bool> ParseUploadPermissionResponse(PcmInfo info, Message message)
+        public bool IsUploadPermissionResponseValid(PcmInfo info, Message message)
         {
             switch (info.HardwareType)
             {
                 case PcmType.P10:
                 case PcmType.P12:
-                    Response<bool> response = this.DoSimpleValidation(message, Priority.Physical0, Mode.PCMUploadRequest);
-                    if (response.Status == ResponseStatus.Success || response.Status == ResponseStatus.Refused)
-                    {
-                        return response;
-                    }
-                    break;
+                    return this.IsMessageValid(message, Priority.Physical0, Mode.PCMUploadRequest);
 
                 default:
-                    response = this.DoSimpleValidation(message, Priority.Physical0, Mode.PCMUploadRequest);
-                    if (response.Status == ResponseStatus.Success || response.Status == ResponseStatus.Refused)
-                    {
-                        return response;
-                    }
-                    break;
+                    return this.IsMessageValid(message, Priority.Physical0, Mode.PCMUploadRequest);
             }
 
             // In case the PCM sends back a 7F message with an 8C priority byte...
-            return this.DoSimpleValidation(message, Priority.Physical0High, Mode.PCMUploadRequest);
+            this.IsMessageValid(message, Priority.Physical0High, Mode.PCMUploadRequest);
         }
 
         /// <summary>
         /// Parse the response to an upload-to-RAM request.
         /// </summary>
-        public Response<bool> ParseUploadResponse(Message message)
+        public bool ValidateUploadResponse(PcmInfo info, Message message)
         {
-            // P12
-            Response<bool> response = this.DoSimpleValidation(message, Priority.Physical0, Mode.PCMUpload);
-            if (response.Status == ResponseStatus.Success || response.Status == ResponseStatus.Refused)
+            switch (info.HardwareType)
             {
-                return response;
-            }
+                case PcmType.P01_P59:
+                    return this.IsMessageValid(message, Priority.Block, Mode.PCMUpload);
 
-            // P01, P10, P59
-            response = this.DoSimpleValidation(message, Priority.Block, Mode.PCMUpload);
-            return response;
+                case PcmType.P10:
+                    return this.IsMessageValid(message, Priority.Block, Mode.PCMUpload);
+
+                case PcmType.P12:
+                    return this.IsMessageValid(message, Priority.Physical0, Mode.PCMUpload);
+
+                default:
+                    throw new ArgumentException($"ValidateUploadResponse unknown PcmType: {info.HardwareType}");
+            }
         }
 
         /// <summary>
@@ -160,19 +155,19 @@ namespace PcmHacking
         /// <remarks>
         /// It is the callers responsability to check the ResponseStatus for errors
         /// </remarks>
-        public Response<byte[]> ParsePayload(Message message, int length, int expectedAddress)
+        public byte[] ParsePayload(Message message, int length, int expectedAddress)
         {
             byte[] actual = message.GetBytes();
             byte[] expected = new byte[] { Priority.Block, DeviceId.Tool, DeviceId.Pcm, Mode.PCMUpload };
-            if (!TryVerifyInitialBytes(actual, expected, out ResponseStatus status))
+            if (!VerifyInitialBytes(actual, expected))
             {
-                return Response.Create(status, new byte[0]);
+                throw new ObdException($"Unexpected response, expected {expected}, got {actual}", ObdExceptionReason.UnexpectedResponse);
             }
 
             // Ensure that we can read the data length and start address from the message.
-            if (actual.Length < 10) 
+            if (actual.Length < 10)
             {
-                return Response.Create(ResponseStatus.Truncated, new byte[0]);
+                throw new ObdException($"Truncated response, got {actual}", ObdExceptionReason.Truncated);
             }
 
             // Read the data length.
@@ -182,7 +177,7 @@ namespace PcmHacking
             int actualAddress = ((actual[7] << 16) + (actual[8] << 8) + actual[9]);
             if (actualAddress != expectedAddress)
             {
-                return Response.Create(ResponseStatus.UnexpectedResponse, new byte[0]);
+                throw new ObdException($"Unexpected data start address, expected {expectedAddress}, got {actualAddress}", ObdExceptionReason.UnexpectedResponse);
             }
 
             byte[] result = new byte[dataLength];
@@ -193,7 +188,7 @@ namespace PcmHacking
                 // With normal encoding, data length should be actual length minus header size
                 if (actual.Length - 12 < dataLength)
                 {
-                    return Response.Create(ResponseStatus.Truncated, new byte[0]);
+                    throw new ObdException($"Truncated response, got {actual}", ObdExceptionReason.Truncated);
                 }
 
                 // Verify block checksum
@@ -202,26 +197,29 @@ namespace PcmHacking
                 Buffer.BlockCopy(actual, 10, result, 0, dataLength);
                 if (PayloadSum != ValidSum)
                 {
-                    return Response.Create(ResponseStatus.Error, result);
+                    throw new ObdException($"Invalid checksum, expected {ValidSum} got {PayloadSum}", ObdExceptionReason.Error);
                 }
 
-                return Response.Create(ResponseStatus.Success, result);
+                return result;
             }
             // RLE block
             else if (actual[4] == 2)
             {
                 // This isnt going to work with existing kernels... need to support variable length.
-                byte value = actual[10];
-                for (int index = 0; index < dataLength; index++)
-                {
-                    result[index] = value;
-                }
 
-                return Response.Create(ResponseStatus.Error, result);
+                // PM -- what in the world? Rewrite the result with whatever is in actual[10], and then error with that as a result?
+                //byte value = actual[10];
+
+                //for (int index = 0; index < dataLength; index++)
+                //{
+                //    result[index] = value;
+                //}
+
+                throw new ObdException($"RLE block type doesnt work.", ObdExceptionReason.Error);
             }
             else
             {
-                return Response.Create(ResponseStatus.Error, result);
+                throw new ObdException($"Unknown block type {actual[4]}", ObdExceptionReason.Error);
             }
         }
     }

@@ -116,15 +116,9 @@ namespace PcmHacking
 
             try
             {
-                Response<int> response = await this.Vehicle.GetPid(pid);
-                if (response.Status == ResponseStatus.Success)
-                {
-                    this.AddUserMessage(string.Format("{0:X4} = {1}", pid, response.Value));
-                }
-                else
-                {
-                    this.AddUserMessage(string.Format("{0:X4} = {1}", pid, response.Status));
-                }
+                int response = await this.Vehicle.GetPid(pid);
+
+                this.AddUserMessage(string.Format("{0:X4} = {1}", pid, response));
             }
             catch(Exception exception)
             {
@@ -192,14 +186,17 @@ namespace PcmHacking
             {
                 for (int address = startAddress; address < startAddress + ramSize; address += 4)
                 {
-                    Response<uint> response = await this.Vehicle.GetRam(address);
-                    if (response.Status != ResponseStatus.Success)
+                    try
+                    {
+                        uint response = await this.Vehicle.GetRam(address);
+
+                        file.Write(BitConverter.GetBytes(response), 0, 4);
+                    }
+                    catch (ObdException)
                     {
                         address -= 4;
                         continue;
                     }
-
-                    file.Write(BitConverter.GetBytes(response.Value), 0, 4);
 
                     if (DateTime.Now > lastYield.AddSeconds(1))
                     {

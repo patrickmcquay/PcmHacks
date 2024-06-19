@@ -72,23 +72,16 @@ namespace PcmHacking
 
                 logger.AddUserMessage("Test kernel found.");
 
-                UInt32 kernelVersion = 0;
-                int keyAlgorithm = 1; // default, will work for most factory operating systems.
-                Response<uint> osidResponse = await this.QueryOperatingSystemId(cancellationToken);
-                if (osidResponse.Status != ResponseStatus.Success)
-                {
-                    kernelVersion = await this.GetKernelVersion();
+                uint osidResponse = await this.QueryOperatingSystemId(cancellationToken);
+                UInt32 kernelVersion = await this.GetKernelVersion();
 
-                    // TODO: Check for recovery mode.                    
-                    // TODO: Load the tiny kernel, then use that to load the test kernel.
-                    // Just to see whether we could potentially use that technique to assist 
-                    // a user whose flash is corrupted and regular flashing isn't working.
-                }
-                else
-                {
-                    PcmInfo pi = new PcmInfo(osidResponse.Value);
-                    keyAlgorithm = pi.KeyAlgorithm;
-                }
+                // TODO: Check for recovery mode.                    
+                // TODO: Load the tiny kernel, then use that to load the test kernel.
+                // Just to see whether we could potentially use that technique to assist 
+                // a user whose flash is corrupted and regular flashing isn't working.
+              
+                PcmInfo pi = new PcmInfo(osidResponse);
+                int keyAlgorithm = pi.KeyAlgorithm;
 
                 this.logger.AddUserMessage("Unlocking PCM...");
                 bool unlocked = await this.UnlockEcu(keyAlgorithm);
@@ -194,11 +187,7 @@ namespace PcmHacking
                         break;
                     }
 
-                    if (!await this.device.SendMessage(query))
-                    {
-                        await Task.Delay(retryDelay);
-                        continue;
-                    }
+                    await this.device.SendMessage(query);
 
                     Message response = await this.device.ReceiveMessage();
                     if (response == null)
@@ -207,16 +196,17 @@ namespace PcmHacking
                         continue;
                     }
 
-                    Response<UInt32> crcResponse = this.protocol.ParseCrc(response, range.Address, range.Size);
-                    if (crcResponse.Status != ResponseStatus.Success)
+                    try
                     {
+                        crc = this.protocol.ParseCrc(response, range.Address, range.Size);
+                        success = true;
+                        break;
+                    }
+                    catch
+                    { 
                         await Task.Delay(retryDelay);
                         continue;
                     }
-
-                    success = true;
-                    crc = crcResponse.Value;
-                    break;
                 }
 
                 this.device.ClearMessageQueue();
@@ -253,16 +243,17 @@ namespace PcmHacking
             for (int attempts = 0; attempts < 100; attempts++)
             {
                 Message vq = this.protocol.CreateKernelVersionQuery();
+                
                 await this.device.SendMessage(vq);
+                
                 Message vr = await this.device.ReceiveMessage();
+                
                 if (vr != null)
                 {
-                    Response<UInt32> resp = this.protocol.ParseKernelVersion(vr);
-                    if (resp.Status == ResponseStatus.Success)
-                    {
-                        this.logger.AddDebugMessage("Got Kernel Version");
-                        successRate++;
-                    }
+                    UInt32 resp = this.protocol.ParseKernelVersion(vr);
+                    
+                    this.logger.AddDebugMessage($"Got Kernel Version {resp}");
+                    successRate++;
                 }
 
                 await Task.Delay(0);
@@ -289,67 +280,14 @@ namespace PcmHacking
                 Message responseMessage = await this.device.ReceiveMessage();
                 if (responseMessage != null)
                 {
-                    Response<UInt32> resp = this.protocol.ParseFlashMemoryType(responseMessage);
-                    if (resp.Status == ResponseStatus.Success)
-                    {
-                        this.logger.AddUserMessage("Flash chip ID: " + resp.Value.ToString("X8"));
-                        this.logger.AddDebugMessage("Got Kernel Version");
-                        successRate++;
-                    }
+                    UInt32 resp = this.protocol.ParseFlashMemoryType(responseMessage);
+                    
+                    this.logger.AddUserMessage("Flash chip ID: " + resp.ToString("X8"));
+                    this.logger.AddDebugMessage("Got Kernel Version");
+                    successRate++;
                 }
 
                 await Task.Delay(0);
-                continue;
-            }
-        }
-
-
-        /// <summary>
-        /// AllPro was getting data corruption when payloads got close to 2kb. 
-        /// Still not sure what's up with that. 
-        /// Using 1kb payloads until we figure that out.
-        /// </summary>
-        private async Task InvestigateDataCorruption(CancellationToken cancellationToken)
-        {
-            await this.device.SetTimeout(TimeoutScenario.Maximum);
-
-            for (int length = 2010; length < 2055; length += 16)
-            //for (int iterations = 0; iterations < 100; iterations++)
-            {
-                //int length = 2040;
-                byte[] payload = new byte[length];
-                for (int index = 0; index < length; index++)
-                {
-                    payload[index] = 1;
-                }
-
-                Message blockMessage = protocol.CreateBlockMessage(
-                    payload,
-                    0,
-                    length,
-                    0xFFB000,
-                    BlockCopyType.Copy);
-
-                for (int i = 3; i > 0; i--)
-                {
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        return;
-                    }
-
-                    if (!await device.SendMessage(blockMessage))
-                    {
-                        this.logger.AddDebugMessage("WritePayload: Unable to send message.");
-                        continue;
-                    }
-
-                    if (await this.WaitForSuccess(this.protocol.ParseUploadResponse, cancellationToken))
-                    {
-                        break;
-                    }
-
-                    this.logger.AddDebugMessage("WritePayload: Upload request failed.");
-                }
             }
         }
     }

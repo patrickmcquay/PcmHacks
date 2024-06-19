@@ -132,10 +132,8 @@ namespace PcmHacking
         /// </summary>
         public bool TryParseRawLogData(Message message, out RawLogData rawLogData)
         {
-            ResponseStatus unused;
-
             // The priority byte changes from 6C to 8C after the first tool-present message is sent.
-            if (!TryVerifyInitialBytes(message.GetBytes(), new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, 0x6A }, out unused))
+            if (!VerifyInitialBytes(message.GetBytes(), new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, 0x6A }))
             {
                 rawLogData = null;
                 return false;
@@ -182,14 +180,12 @@ namespace PcmHacking
         /// <summary>
         /// Parse the value of the requested PID.
         /// </summary>
-        public Response<int> ParsePidResponse(Message message)
+        public int ParsePidResponse(Message message)
         {
-            ResponseStatus status;
-            if (!this.TryVerifyInitialBytes(
-                message.GetBytes(), 
-                new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.GetPid + Mode.Response }, out status))
+            var getPid = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.GetPid + Mode.Response };
+            if (!this.VerifyInitialBytes(message.GetBytes(), getPid))
             {
-                return Response.Create(status, 0);    
+                throw new ObdException($"Error verifying PID response. Response: {message.GetBytes()}", ObdExceptionReason.Error);
             }
 
             int value;
@@ -209,7 +205,7 @@ namespace PcmHacking
                     throw new UnsupportedFormatException("Only 1 and 2 byte PIDs are supported for now.");
             }
 
-            return Response.Create(ResponseStatus.Success, value);
+            return value;
         }
 
         /// <summary>
@@ -226,45 +222,42 @@ namespace PcmHacking
         /// <summary>
         /// Parse the value of the requested PID.
         /// </summary>
-        public Response<uint> ParseRamResponse(Message message)
-        {                        
+        public uint ParseRamResponse(Message message)
+        {
+            var responseBytes = message.GetBytes();
+
             if (message[3] == Mode.NegativeResponse && message[4] == Mode.GetRam)
             {
                 // Illegal address.
                 if (message[9] == 0x31)
                 {
-                    return Response.Create(ResponseStatus.Success, (uint)0xEEEEEEEE);
+                    throw new ObdException($"Illegal RAM Address: {responseBytes}", ObdExceptionReason.Error);
                 }
 
-                return Response.Create(ResponseStatus.Error, (uint)0);
+                throw new ObdException($"RAM response error: {responseBytes}", ObdExceptionReason.Error);
             }
 
-            ResponseStatus status;
-            if (!this.TryVerifyInitialBytes(
-                message.GetBytes(),
-                new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.GetRam + Mode.Response }, out status))
+            var getRam = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.GetRam + Mode.Response };
+            if (!this.VerifyInitialBytes(responseBytes, getRam))
             {
-                return Response.Create(status, (uint)0);
+                throw new ObdException($"Error verifying RAM response. Response: {responseBytes}", ObdExceptionReason.Error);
+            }
+
+            if (responseBytes.Length != 10)
+            {
+                throw new ObdException($"Unexpected read-RAM response message length. Got {responseBytes}", ObdExceptionReason.Truncated);
             }
 
             uint value;
-            switch (message.Length)
-            {
-                case 10:
-                    value = message[9];
-                    value <<= 8;
-                    value |= message[8];
-                    value <<= 8;
-                    value |= message[7];
-                    value <<= 8;
-                    value |= message[6];
-                    break;
+            value = message[9];
+            value <<= 8;
+            value |= message[8];
+            value <<= 8;
+            value |= message[7];
+            value <<= 8;
+            value |= message[6];
 
-                default:
-                    throw new UnsupportedFormatException("Unexpected read-RAM response message length.");
-            }
-
-            return Response.Create(ResponseStatus.Success, value);
+            return value;
         }
     }
 }

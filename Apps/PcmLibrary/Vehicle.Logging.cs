@@ -72,10 +72,7 @@ namespace PcmHacking
                             pidParameter.PID);
 
                         // Response parsing happens further below.
-                        if (!await this.SendMessage(configurationMessage))
-                        {
-                            throw new LogStartFailedException("Unable to send DPID configuration request.");
-                        }
+                        await this.SendMessage(configurationMessage);
 
                         byteCount = pidParameter.ByteCount;
                     }
@@ -92,10 +89,7 @@ namespace PcmHacking
                                 address);
 
                             // Response parsing happens further below.
-                            if (!await this.SendMessage(configurationMessage))
-                            {
-                                throw new LogStartFailedException("Unable to send DPID configuration request.");
-                            }
+                            await this.SendMessage(configurationMessage);
 
                             byteCount = ramParameter.ByteCount;
                         }
@@ -173,26 +167,17 @@ namespace PcmHacking
             {
                 // Request all of the parameters at 5hz using stream 1.
                 Message step1 = this.protocol.RequestDpids(dpids, Protocol.DpidRequestType.Stream1);
-                if (!await this.SendMessage(step1))
-                {
-                    return false;
-                }
+                await this.SendMessage(step1);
 
                 // Request all of the parameters at 5hz using stream 2. Now we get them all at 10hz.
                 Message step2 = this.protocol.RequestDpids(dpids, Protocol.DpidRequestType.Stream2);
-                if (!await this.SendMessage(step2))
-                {
-                    return false;
-                }
+                await this.SendMessage(step2);
             }
             else
             {
                 // Request one row of data.
                 Message startMessage = this.protocol.RequestDpids(dpids, Protocol.DpidRequestType.SingleRow);
-                if (!await this.SendMessage(startMessage))
-                {
-                    return false;
-                }
+                await this.SendMessage(startMessage);
             }
 
             return true;
@@ -237,24 +222,21 @@ namespace PcmHacking
         /// </summary>
         /// <param name="pid"></param>
         /// <returns></returns>
-        public async Task<Response<int>> GetPid(UInt32 pid)
+        public async Task<int> GetPid(UInt32 pid)
         {
             Message request = this.protocol.CreatePidRequest(pid);
-            if(!await this.TrySendMessage(request, "PID request"))
-            {
-                return Response.Create(ResponseStatus.Error, 0);
-            }
+            await this.SendMessage(request);
 
             Message responseMessage = await this.ReceiveMessage();
             if (responseMessage == null)
             {
-                return Response.Create(ResponseStatus.Error, 0);
+                throw new ObdException("Error recieving PID response.", ObdExceptionReason.Error);
             }
 
             return this.protocol.ParsePidResponse(responseMessage);
         }
 
-        public async Task<Response<uint>> GetRam(int address)
+        public async Task<uint> GetRam(int address)
         {
             Query<uint> query = new Query<uint>(
                 this.device,
@@ -264,154 +246,6 @@ namespace PcmHacking
                 CancellationToken.None);
 
             return await query.Execute();
-        }
-
-        /// <summary>
-        /// For historical reference only.
-        /// </summary>
-        /// <returns></returns>
-        public async Task<bool> StartLogging_Old()
-        {
-            // NOT SUPPORTED (in my ROM anyway, need to try others)
-            // 19F3 - transmission temprature
-            // 1602 - oil temperature
-            // 125D - knock retard
-            // 19F5 - current gear
-            // 125E - knock count, two-byte
-
-            // Configure logging parameters
-            // DPID numbers 0xF2-0xFE all work
-            // 0xFE is highest priority
-            // 0xFA is very slow
-            byte dpid1 = 0xFE;
-
-
-            // Load 2 bytes of SAE RPM to DPID positions 1 and 2
-            Message message = this.protocol.ConfigureDynamicData(dpid1, DefineBy.Pid, 1, 2, 0x000C);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // load 2 bytes from SAE MAF to positions 3 and 4
-            message = this.protocol.ConfigureDynamicData(dpid1, DefineBy.Pid, 3, 2, 0x0010);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // load 1 byte of SAE MAP to position 5
-            message = this.protocol.ConfigureDynamicData(dpid1, DefineBy.Pid, 5, 1, 0x000B);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // load 1 byte of SAE TPS to position 6
-            message = this.protocol.ConfigureDynamicData(dpid1, DefineBy.Pid, 6, 1, 0x0011);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            byte dpid2 = 0xFD;
-
-            // Load SAE IAT to DPID position 1
-            message = this.protocol.ConfigureDynamicData(dpid2, DefineBy.Pid, 1, 1, 0x000F);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // Load SAE coolant temperature to position 2
-            message = this.protocol.ConfigureDynamicData(dpid2, DefineBy.Pid, 2, 1, 0x0005);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // load 1 byte of SAE trans temp to position 3 (this is raw sensor value.)
-            message = this.protocol.ConfigureDynamicData(dpid2, DefineBy.Pid, 3, 1, 0x19AD);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // load 1 byte of SAE speed (KMH) to position 4 
-            message = this.protocol.ConfigureDynamicData(dpid2, DefineBy.Pid, 4, 1, 0x000D);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // load 1 byte of GM Knock to position 5
-            message = this.protocol.ConfigureDynamicData(dpid2, DefineBy.Pid, 5, 1, 0x11A6);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // load 1 byte of GM fuel status to position 6 
-            message = this.protocol.ConfigureDynamicData(dpid2, DefineBy.Pid, 6, 1, 0x1105);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            /*
-            byte dpid3 = 0xFC;
-
-            // Load left LTFT to position 1
-            message = this.protocol.ConfigureDynamicData(dpid3, DefineBy.Pid, 1, 1, 0x0007);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // Load right LTFT to position 2
-            message = this.protocol.ConfigureDynamicData(dpid3, DefineBy.Pid, 2, 1, 0x0009);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // load 1 byte of Gm Target AFR to position 3 (0:1-25.5:1)
-            message = this.protocol.ConfigureDynamicData(dpid3, DefineBy.Pid, 3, 1, 0x119E);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // load 1 byte of GM battery voltage to position 4
-            message = this.protocol.ConfigureDynamicData(dpid3, DefineBy.Pid, 4, 1, 0x1141);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // load 1 byte of GM current BLM cell to position 5 
-            message = this.protocol.ConfigureDynamicData(dpid3, DefineBy.Pid, 5, 1, 0x1190);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            // load 1 byte of "normalized TPS" (so what's the other TPS parmeter?) to position 6
-            message = this.protocol.ConfigureDynamicData(dpid3, DefineBy.Pid, 6, 1, 0x1151);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-            */
-
-            // Start logging
-            //message = this.protocol.BeginLogging(dpid1, dpid2);//, dpid3);
-            if (!await this.SendMessage(message))
-            {
-                return false;
-            }
-
-            return true;
         }
     }
 }

@@ -104,64 +104,40 @@ namespace PcmHacking
             return DeviceType;
         }
 
-        public override async Task<bool> Initialize()
+        public override async Task Initialize()
         {
             this.Logger.AddDebugMessage("Initializing " + this.ToString());
 
 
             SerialPortConfiguration configuration = new SerialPortConfiguration();
+            
             configuration.BaudRate = 115200;
             configuration.Timeout = 1000;
+
             await this.Port.OpenAsync(configuration);
+            
             System.Threading.Thread.Sleep(200);
-          // await Task.Delay(200);
 
-            ////Reset scantool - ensures starts at ELM protocol
-            bool Status = await ResetDevice();
-            if (Status == false)
+            //Reset scantool - ensures starts at ELM protocol
+            if (!await ResetDevice())
             {
-                this.Logger.AddUserMessage("Unable to reset DVI device.");
-                return false;
+                throw new ObdException("Unable to reset DVI device.", ObdExceptionReason.Error);
             }
 
-             
-
-            //Request Board information
-            Response<string> BoardName = await GetBoardDetails();
-            if (BoardName.Status != ResponseStatus.Success)
-            {
-                this.Logger.AddUserMessage("Unable to get DVI device details.");
-                return false;
-            }
-
+            //Request Board information (this logs to the screen as well as returning, so we dont need to do anything with the returned info)
+            await GetBoardDetails();
 
             //Read voltage
-            Response<double> ReadVoltageVal = await ReadVoltage();
-            if (ReadVoltageVal.Status != ResponseStatus.Success)
-            {
-                this.Logger.AddUserMessage("Unable to read voltage.");
-                return false;
-            }
-            this.Logger.AddUserMessage("Voltage is: " + ReadVoltageVal.Value.ToString("F2") + "V");
+            double ReadVoltageVal = await ReadVoltage();
 
+            this.Logger.AddUserMessage($"Voltage is: {ReadVoltageVal:F2}V");
 
             //Set protocol to VPW mode
-            Status = await SetProtocol(OBDProtocols.VPW);
-            if (Status == false)
-            {
-                this.Logger.AddUserMessage("Unable to set DVI device protocol to VPW.");
-                return false;
-            }
+            await SetProtocol(OBDProtocols.VPW);
 
-            Response<bool> SetupStatus = await DVISetup();
-            if (SetupStatus.Status != ResponseStatus.Success)
-            {
-                this.Logger.AddUserMessage("DVI device initialization failed.");
-                return false;
-            }
+            await DVISetup();
 
             this.Logger.AddUserMessage("Device Successfully Initialized and Ready");
-            return true;
         }
 
         /// <summary>
@@ -178,20 +154,20 @@ namespace PcmHacking
         /// This will process incoming messages for up to 250ms looking for a message
         /// </summary>
 
-        public async Task<Response<Message>> FindResponseFromTool(byte[] expected)
+        public async Task<Message> FindResponseFromTool(byte[] expected)
         {
-            //this.Logger.AddDebugMessage("FindResponse called");
             for (int iterations = 0; iterations < 5; iterations++)
             {
-                Response<Message> response = await this.ReadDVIPacket(this.GetReceiveTimeout());
+                Message response = await this.ReadDVIPacket(this.GetReceiveTimeout());
+
                 if (response != null)  // Hack to silence error - See: https://pcmhacking.net/forums/viewtopic.php?f=42&t=6730&start=110#p101790
-                    if (response.Status == ResponseStatus.Success)
-                        if (Utility.CompareArraysPart(response.Value.GetBytes(), expected))
-                            return Response.Create(ResponseStatus.Success, (Message)response.Value);
+                    if (Utility.CompareArraysPart(response.GetBytes(), expected))
+                        return response;
+
                 await Task.Delay(50);
             }
 
-            return Response.Create(ResponseStatus.Timeout, (Message)null);
+            throw new ObdException("Unable to find response from tool. Timeout.", ObdExceptionReason.Timeout);
         }
 
         /// <summary>
@@ -235,7 +211,7 @@ namespace PcmHacking
         /// If it recevies a Network message, in enqueues it and returns null;
         /// If it receives a Device message, it returns the message.
         /// </summary>
-        async private Task<Response<Message>> ReadDVIPacket(int timeout = 0)
+        async private Task<Message> ReadDVIPacket(int timeout = 0)
         {
             UInt16 Length = 0;
 
@@ -247,14 +223,12 @@ namespace PcmHacking
             //Second is length, third also for long frame
             //Data
             //Checksum
-            bool Chk = false;
+
             try
             {
-                Chk = (await WaitForSerial(1, timeout));
-                if (Chk == false)
+                if (!await WaitForSerial(1, timeout))
                 {
-                    this.Logger.AddDebugMessage("Timeout.. no data present A");
-                    return Response.Create(ResponseStatus.Timeout, (Message)null);
+                    throw new ObdException("Timeout.. no data present A", ObdExceptionReason.Timeout);
                 }
 
                 //get first byte for command
@@ -262,10 +236,8 @@ namespace PcmHacking
             }
             catch (Exception) // timeout exception - log no data, return error.
             {
-                this.Logger.AddDebugMessage("No Data");
-                return Response.Create(ResponseStatus.Timeout, (Message)null);
+                throw new ObdException("No Data", ObdExceptionReason.Error);
             }
-
 
             if (rx[0] == 0x8 || rx[0] == 0x9) //for network frames
             {
@@ -275,11 +247,9 @@ namespace PcmHacking
                     //next 4 bytes will be timestamp in microseconds
                     for (byte i = 0; i < 4; i++)
                     {
-                        Chk = (await WaitForSerial(1));
-                        if (Chk == false)
+                        if (!await WaitForSerial(1))
                         {
-                            this.Logger.AddDebugMessage("Timeout.. no data present B");
-                            return Response.Create(ResponseStatus.Timeout, (Message)null);
+                            throw new ObdException("Timeout.. no data present B", ObdExceptionReason.Timeout);
                         }
                         await this.Port.Receive(timestampbuf, i, 1);
                     }
@@ -287,11 +257,9 @@ namespace PcmHacking
                 }
                 if (rx[0] == 0x8) //if short, only get one byte for length
                 {
-                    Chk = (await WaitForSerial(1));
-                    if (Chk == false)
+                    if (!await WaitForSerial(1))
                     {
-                        this.Logger.AddDebugMessage("Timeout.. no data present C");
-                        return Response.Create(ResponseStatus.Timeout, (Message)null);
+                        throw new ObdException("Timeout.. no data present C", ObdExceptionReason.Timeout);
                     }
                     await this.Port.Receive(rx, 1, 1);
                     Length = rx[1];
@@ -299,11 +267,9 @@ namespace PcmHacking
                 else //if long, get two bytes for length
                 {
                     offset += 1;
-                    Chk = (await WaitForSerial(2));
-                    if (Chk == false)
+                    if (!await WaitForSerial(2))
                     {
-                        this.Logger.AddDebugMessage("Timeout.. no data present D");
-                        return Response.Create(ResponseStatus.Timeout, (Message)null);
+                        throw new ObdException("Timeout.. no data present D", ObdExceptionReason.Timeout);
                     }
                     await this.Port.Receive(rx, 1, 2);
                     Length = (ushort)((ushort)(rx[1] * 0x100) + rx[2]);
@@ -312,22 +278,18 @@ namespace PcmHacking
             }
             else //for all other received frames
             {
-                Chk = (await WaitForSerial(1));
-                if (Chk == false)
+                if (!await WaitForSerial(1))
                 {
-                    this.Logger.AddDebugMessage("Timeout.. no data present E");
-                    return Response.Create(ResponseStatus.Timeout, (Message)null);
+                    throw new ObdException("Timeout.. no data present E", ObdExceptionReason.Timeout);
                 }
                 await this.Port.Receive(rx, 1, 1);
                 Length = rx[1];
             }
 
             byte[] receive = new byte[Length + 3 + offset];
-            Chk = (await WaitForSerial((ushort)(Length + 1)));
-            if (Chk == false)
+            if (!await WaitForSerial((ushort)(Length + 1)))
             {
-                this.Logger.AddDebugMessage("Timeout.. no data present F");
-                return Response.Create(ResponseStatus.Timeout, (Message)null);
+                throw new ObdException("Timeout.. no data present F", ObdExceptionReason.Timeout);
             }
 
             int bytes;
@@ -337,8 +299,7 @@ namespace PcmHacking
             bytes = await this.Port.Receive(receive, 2 + offset, Length + 1);//get rest of frame
             if (bytes <= 0)
             {
-                this.Logger.AddDebugMessage("Failed reading " + Length + " byte packet");
-                return Response.Create(ResponseStatus.Error, (Message)null);
+                throw new ObdException($"Failed reading {Length} byte packet", ObdExceptionReason.Error);
             }
             //should have entire frame now
             //verify checksum correct
@@ -363,8 +324,6 @@ namespace PcmHacking
                 return null;
             }
 
-            // this.Logger.AddDebugMessage("Total Length Data=" + Length + " RX: " + receive.ToHex());
-
             if (receive[0] == 0x8 || receive[0] == 0x9)
             {
                 //network frames //Strip header and checksum
@@ -381,77 +340,62 @@ namespace PcmHacking
                 // Error from the device
                 Message result = new Message(receive);
                 this.Logger.AddDebugMessage("XPro Error: " + result.ToString());
-                return Response.Create(ResponseStatus.Error, result);
+                throw new ObdException($"XPro Error: " + result.ToString(), ObdExceptionReason.Error);
             }
             else
             {
                 // Valid message from the device
                 this.Logger.AddDebugMessage("XPro: " + receive.ToHex());
-                return Response.Create(ResponseStatus.Success, new Message(receive));
+                return new Message(receive);
             }
         }
 
 
-        async private Task<Response<String>> ReadELMPacket(String SentFrame)
+        async private Task<String> ReadELMPacket(String SentFrame)
         {
-            // UInt16 Counter = 0;
             bool framefound = false;
-            bool Chk = false;
 
             string StrResp = "";
             byte[] rx = { 0 };
-            try
-            {
-                while (framefound == false)
-                {
-                    Chk = (await WaitForSerial(1));
-                    if (Chk == false)
-                    {
-                        this.Logger.AddDebugMessage("Timeout.. no data present");
-                        return Response.Create(ResponseStatus.Timeout, "");
-                    }
 
-                    await this.Port.Receive(rx, 0, 1);
-                    if (rx[0] == 0xD) //carriage return
-                    {
-                        if (StrResp != SentFrame)
-                        {
-                            framefound = true;
-                            break;
-                        }
-                        StrResp = "";
-                        continue;
-                    }
-                    else if (rx[0] == 0xA) continue;//newline
-                    StrResp += Convert.ToChar(rx[0]);
+            while (framefound == false)
+            {
+                if (!await WaitForSerial(1))
+                {
+                    throw new ObdException("Timeout.. no data present", ObdExceptionReason.Timeout);
                 }
 
-                //Find Idle frame
-                framefound = false;
-                while (framefound == false)
+                await this.Port.Receive(rx, 0, 1);
+                if (rx[0] == 0xD) //carriage return
                 {
-                    Chk = (await WaitForSerial(1));
-                    if (Chk == false)
-                    {
-                        this.Logger.AddDebugMessage("ELM Idle frame not detected");
-                        return Response.Create(ResponseStatus.Timeout, "");
-                    }
-                    await this.Port.Receive(rx, 0, 1);
-                    if (rx[0] == '>')
+                    if (StrResp != SentFrame)
                     {
                         framefound = true;
                         break;
                     }
+                    StrResp = "";
+                    continue;
                 }
-                return Response.Create(ResponseStatus.Success, StrResp);
-
+                else if (rx[0] == 0xA) continue;//newline
+                StrResp += Convert.ToChar(rx[0]);
             }
-            catch (Exception) // timeout exception - log no data, return error.
+
+            //Find Idle frame
+            framefound = false;
+            while (framefound == false)
             {
-                this.Logger.AddDebugMessage("No Data");
-                return Response.Create(ResponseStatus.Timeout, (""));
+                if (!await WaitForSerial(1))
+                {
+                    throw new ObdException("ELM Idle frame not detected", ObdExceptionReason.Timeout);
+                }
+                await this.Port.Receive(rx, 0, 1);
+                if (rx[0] == '>')
+                {
+                    framefound = true;
+                    break;
+                }
             }
-
+            return StrResp;
         }
 
         /// <summary>
@@ -471,7 +415,7 @@ namespace PcmHacking
         /// <summary>
         /// Convert a Message to an DVI formatted transmit, and send to the interface
         /// </summary>
-        async private Task<Response<Message>> SendDVIPacket(Message message)
+        async private Task<Message> SendDVIPacket(Message message)
         {
             int length = message.GetBytes().Length;
             byte[] RawPacket = message.GetBytes();
@@ -499,71 +443,55 @@ namespace PcmHacking
             await this.Port.Send(SendPacket);
 
             // Wait for confirmation of successful send
-            Response<Message> m = null;
-
             for (int attempt = 0; attempt < 10; attempt++)
             {
-                m = await ReadDVIPacket(500);
-                if (m != null)
+                try
                 {
-                    if (m.Status == ResponseStatus.Timeout)
+                    var m = await ReadDVIPacket(500);
+                    if (m != null)
                     {
-                        continue;
+                        byte[] Val = m.GetBytes();
+                        if (Val[0] == 0x20 && Val[2] == 0x00 || Val[0] == 0x21 && Val[2] == 0x00)
+                        {
+                            this.Logger.AddDebugMessage("TX: " + message.ToString());
+                            return message;
+                        }
+                        else
+                        {
+                            throw new ObdException("Unable to transmit, odd response from device: " + message.ToString(), ObdExceptionReason.UnexpectedResponse);
+                        }
                     }
-                    break;
+                }
+                catch(ObdException ex)
+                {
+                    if (ex.Reason == ObdExceptionReason.Timeout) 
+                    { 
+                        continue; 
+                    }
+                    else
+                    {
+                        throw;
+                    }
                 }
             }            
 
-            if (m == null)
-            {
-                // This should never happen, but just in case...
-                this.Logger.AddUserMessage("No response to send attempt. " + message.ToString());
-                return Response.Create(ResponseStatus.Error, new Message(new byte[0]));
-            }
-
-            if (m.Status == ResponseStatus.Success)
-            {
-                byte[] Val = m.Value.GetBytes();
-                if (Val[0] == 0x20 && Val[2] == 0x00)
-                {
-                    this.Logger.AddDebugMessage("TX: " + message.ToString());
-                    return Response.Create(ResponseStatus.Success, message);
-                }
-                else if (Val[0] == 0x21 && Val[2] == 0x00)
-                {
-                    this.Logger.AddDebugMessage("TX: " + message.ToString());
-                    return Response.Create(ResponseStatus.Success, message);
-                }
-                else
-                {
-                    this.Logger.AddUserMessage("Unable to transmit, odd response from device: " + message.ToString());
-                    return Response.Create(ResponseStatus.Error, message);
-                }
-            }
-            else
-            {
-                this.Logger.AddUserMessage("Unable to transmit, " + m.Status + ": " + message.ToString());
-                return Response.Create(ResponseStatus.Error, message);
-            }
+            // This should never happen, but just in case...
+            throw new ObdException("No response to send attempt. " + message.ToString(), ObdExceptionReason.Timeout);
         }
 
         /// <summary>
         /// Configure DVI to return only packets targeted to the tool (Device ID F0), and disable transmit acks
         /// </summary>
-        async private Task<Response<Boolean>> DVISetup()
+        async private Task DVISetup()
         {
             //Set filter
-            bool Status = await SetToFilter(DeviceId.Tool);
-            if (Status == false) return Response.Create(ResponseStatus.Error, false);
+            await SetToFilter(DeviceId.Tool);
 
             //Enable network rx/tx for protocol
-            Status = await EnableProtocolNetwork();
-            if (Status == false) return Response.Create(ResponseStatus.Error, false);
-
-            return Response.Create(ResponseStatus.Success, true);
+            await EnableProtocolNetwork();
         }
 
-        async private Task<Response<double>> ReadVoltage()
+        async private Task<double> ReadVoltage()
         {
             byte[] Msg = new byte[] { 0x3A, 2, 0x0, (byte)0, 0 };
             Msg[Msg.Length - 1] = CalcChecksum(Msg);
@@ -573,30 +501,21 @@ namespace PcmHacking
             Array.Copy(Msg, RespBytes, Msg.Length);
             RespBytes[0] += (byte)0x10;
             RespBytes[RespBytes.Length - 1] = CalcChecksum(RespBytes);
-            Response<Message> response = await ReadDVIPacket();
-            if (response.Status != ResponseStatus.Success)
-            {
-             //   this.Logger.AddDebugMessage("Network enabled");
-                return Response.Create(response.Status, (double)0);
-            }
-            else
-            {
-                int RawADC = (int)((response.Value[4] * Math.Pow(0x100, 1)) + response.Value[5]);
-                double COnvertedVoltage = ((((double)RawADC * 0.009047468) + 0.2)); //Should match for both VT and GT (Close enough).
-                //this.Logger.AddDebugMessage("Voltage is: " + COnvertedVoltage.ToString("F2") + "V"); //2 decimal places
-                return Response.Create(ResponseStatus.Success, COnvertedVoltage);
-            }
+            
+            Message response = await ReadDVIPacket();
+
+                int RawADC = (int)((response[4] * Math.Pow(0x100, 1)) + response[5]);
+                double ConvertedVoltage = (RawADC * 0.009047468) + 0.2; //Should match for both VT and GT (Close enough).
+                
+                return ConvertedVoltage;
         }
 
         /// <summary>
         /// Send a message, wait for a response, return the response.
         /// </summary>
-        public override async Task<bool> SendMessage(Message message)
+        public override async Task SendMessage(Message message)
         {
-            //this.Logger.AddDebugMessage("Sendrequest called");
-            //  this.Logger.AddDebugMessage("TX: " + message.GetBytes().ToHex());
             await SendDVIPacket(message);
-            return true;
         }
 
         /// <summary>
@@ -633,9 +552,9 @@ namespace PcmHacking
             //AT@1 will return OBDX Pro VT - will then need to change its API to DVI bytes.
             byte[] MsgAT1 = { (byte)'A', (byte)'T', (byte)'@', (byte)'1', 0xD };
             await this.Port.Send(MsgAT1);
-            Response<String> m = await ReadELMPacket("AT@1");
-            if (m.Status == ResponseStatus.Success) this.Logger.AddUserMessage("Device Found: " + m.Value);
-            else { this.Logger.AddUserMessage("OBDX Pro device not found or failed response"); return false; }
+            string m = await ReadELMPacket("AT@1");
+            
+            this.Logger.AddUserMessage("Device Found: " + m);
 
             System.Threading.Thread.Sleep(150);
             await this.Port.DiscardBuffers();
@@ -644,31 +563,22 @@ namespace PcmHacking
             byte[] MsgDXDP = { (byte)'D', (byte)'X', (byte)'D', (byte)'P', (byte)'1', 0xD };
             await this.Port.Send(MsgDXDP);
             m = await ReadELMPacket("DXDP1");
-            if (m.Status == ResponseStatus.Success && m.Value == "OK") this.Logger.AddDebugMessage("Switched to DVI protocol");
+            if (m == "OK") this.Logger.AddDebugMessage("Switched to DVI protocol");
             else { this.Logger.AddUserMessage("Failed to switch to DVI protocol"); return false; }
             return true;
         }
 
-        private async Task<Response<string>> GetBoardDetails()
+        private async Task<string> GetBoardDetails()
         {
             string Details = "";
             byte[] Msg = OBDXProDevice.DVI_BOARD_NAME.GetBytes();
             Msg[Msg.Length - 1] = CalcChecksum(Msg);
             await this.Port.Send(Msg);
 
-            Response<Message> m = await ReadDVIPacket();
-            if (m.Status == ResponseStatus.Success)
-            {
-                byte[] Val = m.Value.GetBytes();
-                ToolConnected = System.Text.Encoding.ASCII.GetString(Val, 3, Val[1] - 1);
-                //  this.Logger.AddUserMessage("Device Found: " + name);
-                // return new Response<String>(ResponseStatus.Success, name);
-            }
-            else
-            {
-                this.Logger.AddUserMessage("OBDX Pro device not found or failed response");
-                return new Response<String>(ResponseStatus.Error, null);
-            }
+            Message m = await ReadDVIPacket();
+            byte[] toolBytes = m.GetBytes();
+            ToolConnected = System.Text.Encoding.ASCII.GetString(toolBytes, 3, toolBytes[1] - 1);
+
             Details = ToolConnected;
 
             if (ToolConnected == "OBDX Pro VC") //Must reduce block size
@@ -682,83 +592,61 @@ namespace PcmHacking
             Msg[Msg.Length - 1] = CalcChecksum(Msg);
             await this.Port.Send(Msg);
             m = await ReadDVIPacket();
-            if (m.Status == ResponseStatus.Success)
+            
+            byte[] firmWareVersionBytes = m.GetBytes();
+            string Firmware = "";
+            if (ToolConnected == "OBDX Pro VT")
             {
-                byte[] Val = m.Value.GetBytes();
-                string Firmware = "";
-                if (ToolConnected == "OBDX Pro VT")
-                {
-                    Firmware = ((float)(Val[3] * 0x100 + Val[4]) / 100).ToString("n2");
-                }
-                else //new firmware standard
-                {
-                    Firmware = Val[3].ToString() + "." + Val[4].ToString() + "." + Val[5].ToString() + "." + Val[6].ToString();
-                }
+                Firmware = ((float)(firmWareVersionBytes[3] * 0x100 + firmWareVersionBytes[4]) / 100).ToString("n2");
+            }
+            else //new firmware standard
+            {
+                Firmware = firmWareVersionBytes[3].ToString() + "." + firmWareVersionBytes[4].ToString() + "." + firmWareVersionBytes[5].ToString() + "." + firmWareVersionBytes[6].ToString();
+            }
                
-                this.Logger.AddDebugMessage("Firmware version: v" + Firmware);
-                Details += " - Firmware: v" + Firmware;
-            }
-            else
-            {
-                this.Logger.AddUserMessage("Unable to read firmware version");
-                return new Response<String>(ResponseStatus.Error, null);
-            }
-
+            this.Logger.AddDebugMessage("Firmware version: v" + Firmware);
+            Details += " - Firmware: v" + Firmware;
+        
             //Hardware version
             Msg = OBDXProDevice.DVI_BOARD_HARDWARE_VERSION.GetBytes();
             Msg[Msg.Length - 1] = CalcChecksum(Msg);
             await this.Port.Send(Msg);
             m = await ReadDVIPacket();
-            if (m.Status == ResponseStatus.Success)
+            
+            byte[] hardwareVersionBytes = m.GetBytes();
+            string Hardware = "";
+            if (ToolConnected == "OBDX Pro VT")
             {
-                byte[] Val = m.Value.GetBytes();
-                string Hardware = "";
-                if (ToolConnected == "OBDX Pro VT")
-                {
-                    Hardware = ((float)(Val[3] * 0x100 + Val[4]) / 100).ToString("n2");
-                }
-                else //new firmware standard
-                {
-                    Hardware = Val[3].ToString() + "." + Val[4].ToString() + "." + Val[5].ToString() + "." + Val[6].ToString();
-                }
+                Hardware = ((float)(hardwareVersionBytes[3] * 0x100 + hardwareVersionBytes[4]) / 100).ToString("n2");
+            }
+            else //new firmware standard
+            {
+                Hardware = hardwareVersionBytes[3].ToString() + "." + hardwareVersionBytes[4].ToString() + "." + hardwareVersionBytes[5].ToString() + "." + hardwareVersionBytes[6].ToString();
+            }
                  
-                this.Logger.AddDebugMessage("Hardware version: v" + Hardware);
-                Details += " - Hardware: v" + Hardware;
-            }
-            else
-            {
-                this.Logger.AddUserMessage("Unable to read hardware version");
-                return new Response<String>(ResponseStatus.Error, null);
-            }
-
-
+            this.Logger.AddDebugMessage("Hardware version: v" + Hardware);
+            Details += " - Hardware: v" + Hardware;
+            
             //Unique Serial
             Msg = OBDXProDevice.DVI_UniqueSerial.GetBytes();
             Msg[Msg.Length - 1] = CalcChecksum(Msg);
             await this.Port.Send(Msg);
             m = await ReadDVIPacket();
-            if (m.Status == ResponseStatus.Success)
-            {
-                byte[] Val = m.Value.GetBytes();
-                byte[] serial = new byte[12];
-                Array.Copy(Val, 3, serial, 0, 12);
-                String Serial = string.Join("", Array.ConvertAll(serial, b => b.ToString("X2")));
-                this.Logger.AddDebugMessage("Unique Serial: " + Serial);
-                Details += " - Unique Serial: " + Serial;
-                return new Response<String>(ResponseStatus.Success, Details);
-            }
-            else
-            {
-                this.Logger.AddUserMessage("Unable to read unique Serial");
-                return new Response<String>(ResponseStatus.Error, null);
-            }
+            
+            byte[] serial = new byte[12];
+            Array.Copy(m.GetBytes(), 3, serial, 0, 12);
+            String Serial = string.Join("", Array.ConvertAll(serial, b => b.ToString("X2")));
+            this.Logger.AddDebugMessage("Unique Serial: " + Serial);
+            Details += " - Unique Serial: " + Serial;
+            
+            return Details;
         }
 
         enum OBDProtocols : UInt16
         {
             VPW = 1
         }
-        private async Task<bool> SetProtocol(OBDProtocols val)
+        private async Task SetProtocol(OBDProtocols val)
         {
             byte[] Msg = OBDXProDevice.DVI_Set_OBD_Protocol.GetBytes();
             Msg[3] = (byte)val;
@@ -770,21 +658,12 @@ namespace PcmHacking
             Array.Copy(Msg, RespBytes, Msg.Length);
             RespBytes[0] += (byte)0x10;
             RespBytes[RespBytes.Length - 1] = CalcChecksum(RespBytes);
-            Response<Message> m = await FindResponseFromTool(RespBytes);
-            if (m.Status == ResponseStatus.Success)
-            {
-                this.Logger.AddDebugMessage("OBD Protocol Set to VPW");
-            }
-            else
-            {
-                this.Logger.AddUserMessage("Unable to set OBDX Pro device to VPW mode");
-                this.Logger.AddDebugMessage("Expected " + string.Join(" ", Array.ConvertAll(Msg, b => b.ToString("X2"))));
-                return false;
-            }
-            return true;
+            Message m = await FindResponseFromTool(RespBytes);
+            
+            this.Logger.AddDebugMessage("OBD Protocol Set to VPW");
         }
 
-        private async Task<bool> SetToFilter(byte Val)
+        private async Task SetToFilter(byte Val)
         {
             byte[] Msg = OBDXProDevice.DVI_Set_To_Filter.GetBytes();
             Msg[3] = Val; // DeviceId.Tool;
@@ -796,21 +675,16 @@ namespace PcmHacking
             Array.Copy(Msg, RespBytes, Msg.Length);
             RespBytes[0] += (byte)0x10;
             RespBytes[RespBytes.Length - 1] = CalcChecksum(RespBytes);
-            Response<Message> response = await ReadDVIPacket();
-            if (response.Status == ResponseStatus.Success & Utility.CompareArraysPart(response.Value.GetBytes(), RespBytes))
-            {
-                this.Logger.AddDebugMessage("Filter set and enabled");
-                return true;
-            }
-            else
-            {
+            
+            Message response = await ReadDVIPacket();
 
-                this.Logger.AddDebugMessage("Failed to set filter");
-                return false;
+            if (!Utility.CompareArraysPart(response.GetBytes(), RespBytes))
+            {
+                throw new ObdException("Failed to set filter", ObdExceptionReason.Error);
             }
         }
 
-        private async Task<bool> EnableProtocolNetwork()
+        private async Task EnableProtocolNetwork()
         {
             byte[] Msg = OBDXProDevice.DVI_Set_NewtorkEnable.GetBytes();
             Msg[3] = 1; //on
@@ -821,16 +695,10 @@ namespace PcmHacking
             Array.Copy(Msg, RespBytes, Msg.Length);
             RespBytes[0] += (byte)0x10;
             RespBytes[RespBytes.Length - 1] = CalcChecksum(RespBytes);
-            Response<Message> response = await ReadDVIPacket();
-            if (response.Status == ResponseStatus.Success & Utility.CompareArraysPart(response.Value.GetBytes(), RespBytes))
+            Message response = await ReadDVIPacket();
+            if (!Utility.CompareArraysPart(response.GetBytes(), RespBytes))
             {
-                this.Logger.AddDebugMessage("Network enabled");
-                return true;
-            }
-            else
-            {
-                this.Logger.AddDebugMessage("Failed to enable network");
-                return false;
+                throw new ObdException("Failed to enable network", ObdExceptionReason.Error);
             }
         }
 
@@ -840,7 +708,7 @@ namespace PcmHacking
         /// <remarks>
         /// The caller must also tell the PCM to switch speeds
         /// </remarks>
-        protected override async Task<bool> SetVpwSpeedInternal(VpwSpeed newSpeed)
+        protected override async Task SetVpwSpeedInternal(VpwSpeed newSpeed)
         {
 
             byte[] Msg = OBDXProDevice.DVI_Set_Speed.GetBytes();
@@ -866,10 +734,8 @@ namespace PcmHacking
             Array.Copy(Msg, RespBytes, Msg.Length);
             RespBytes[0] += (byte)0x10;
             RespBytes[RespBytes.Length - 1] = CalcChecksum(RespBytes);
-            Response<Message> m = await FindResponseFromTool(RespBytes);
-            if (m.Status != ResponseStatus.Success) return false;
-
-            return true;
+            
+            await FindResponseFromTool(RespBytes); // will throw if something is wrong.
         }
 
 

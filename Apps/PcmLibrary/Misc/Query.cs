@@ -31,7 +31,7 @@ namespace PcmHacking
         /// <summary>
         /// Code that will select the response from whatever VPW messages appear on the bus.
         /// </summary>
-        private Func<Message, Response<T>> filter;
+        private Func<Message, T> filter;
                 
         /// <summary>
         /// This will indicate when the user has requested cancellation.
@@ -53,7 +53,7 @@ namespace PcmHacking
         /// <summary>
         /// Constructor.
         /// </summary>
-        public Query(Device device, Func<Message> generator, Func<Message, Response<T>> filter, ILogger logger, CancellationToken cancellationToken, ToolPresentNotifier notifier = null)
+        public Query(Device device, Func<Message> generator, Func<Message, T> filter, ILogger logger, CancellationToken cancellationToken, ToolPresentNotifier notifier = null)
         {
             this.device = device;
             this.generator = generator;
@@ -67,37 +67,24 @@ namespace PcmHacking
         /// <summary>
         /// Send the message, wait for the response.
         /// </summary>
-        public async Task<Response<T>> Execute()
+        public async Task<T> Execute()
         {
             this.device.ClearMessageQueue();
 
             Message request = this.generator();
 
-            bool success = false;
-            for (int sendAttempt = 1; sendAttempt <= 2; sendAttempt++)
+            for (int sendAttempt = 0; sendAttempt < 2; sendAttempt++)
             {
-                if (this.cancellationToken.IsCancellationRequested)
-                {
-                    return Response.Create(ResponseStatus.Cancelled, default(T));
-                }
+                this.cancellationToken.ThrowIfCancellationRequested();
 
-                success = await this.device.SendMessage(request);
-
-                if (!success)
-                {
-                    this.logger.AddDebugMessage("Send failed. Attempt #" + sendAttempt.ToString());
-                    continue;
-                }
+                await this.device.SendMessage(request);
 
                 // We'll read up to 50 times from the queue (just to avoid 
                 // looping forever) but we will but only allow two timeouts.
                 int timeouts = 0;
-                for (int receiveAttempt = 1; receiveAttempt <= 50; receiveAttempt++)
+                for (int receiveAttempt = 0; receiveAttempt < 50; receiveAttempt++)
                 {
-                    if (this.cancellationToken.IsCancellationRequested)
-                    {
-                        return Response.Create(ResponseStatus.Cancelled, default(T));
-                    }
+                    this.cancellationToken.ThrowIfCancellationRequested();
 
                     Message received = await this.device.ReceiveMessage();
 
@@ -107,11 +94,7 @@ namespace PcmHacking
                         if (timeouts >= this.MaxTimeouts)
                         {
                             // Maybe try sending again if we haven't run out of send attempts.
-                            this.logger.AddDebugMessage(
-                                string.Format(
-                                    "Receive timed out. Attempt #{0}, Timeout #{1}.",
-                                    receiveAttempt,
-                                    timeouts));
+                            this.logger.AddDebugMessage($"Receive timed out. Attempt #{receiveAttempt}, Timeout #{timeouts}.");
                             break;
                         }
 
@@ -123,21 +106,18 @@ namespace PcmHacking
                         continue;
                     }
 
-                    Response<T> result = this.filter(received);
-                    if (result.Status == ResponseStatus.Success)
+                    try
                     {
-                        return result;
+                        return this.filter(received);
                     }
-
-                    this.logger.AddDebugMessage(
-                        string.Format(
-                            "Received an unexpected response. Attempt #{0}, status {1}.",
-                            receiveAttempt,
-                            result.Status));
+                    catch (ObdException ex) 
+                    {
+                        this.logger.AddDebugMessage($"Query filter failed, error: {ex.Message}");
+                    }
                 }
             }
 
-            return Response.Create(ResponseStatus.Error, default(T));
+            throw new ObdException("Ran out of send attempts.", ObdExceptionReason.Timeout);
         }
     }
 }

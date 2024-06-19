@@ -123,20 +123,11 @@ namespace PcmHacking
         protected override async Task ValidDeviceSelectedAsync(string deviceName)
         {
             this.AddDebugMessage("ValidDeviceSelectedAsync started.");
-            Response<uint> response = await this.Vehicle.QueryOperatingSystemId(new CancellationToken());
-            if (response.Status != ResponseStatus.Success)
-            {
-                this.Invoke((MethodInvoker)delegate ()
-                {
-                    this.deviceDescription.Text = deviceName + " is unable to connect to the PCM";
-                });
-
-                return;
-            }
+            uint response = await this.Vehicle.QueryOperatingSystemId(new CancellationToken());
 
             // This must be assigned prior to calling FillParameterGrid(), 
             // otherwise the RAM parameters will not appear in the grid.
-            this.osid = response.Value;
+            this.osid = response;
 
             this.Invoke((MethodInvoker)delegate ()
             {

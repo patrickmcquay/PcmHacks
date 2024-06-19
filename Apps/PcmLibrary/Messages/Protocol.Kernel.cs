@@ -18,9 +18,9 @@ namespace PcmHacking
             return new Message(new byte[] { Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, 0x3D, 0x00 });
         }
 
-        internal Response<UInt32> ParseKernelVersion(Message responseMessage)
+        internal UInt32 ParseKernelVersion(Message responseMessage)
         {
-            return ParseUInt32(responseMessage, 0x3D, 0x00);
+            return ParseUInt32WithSubMode(responseMessage, 0x3D, 0x00);
         }
 
         /// <summary>
@@ -47,9 +47,9 @@ namespace PcmHacking
         /// <summary>
         /// Parse the operating system ID from a kernel response.
         /// </summary>
-        public Response<UInt32> ParseOperatingSystemIdKernelResponse(Message message)
+        public UInt32 ParseOperatingSystemIdKernelResponse(Message message)
         {
-            return ParseUInt32(message, 0x7D);
+            return ParseUInt32WithoutSubMode(message, 0x7D);
         }
 
         /// <summary>
@@ -60,9 +60,9 @@ namespace PcmHacking
             return new Message(new byte[] { Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, 0x3D, 0x01 });
         }
 
-        internal Response<UInt32> ParseFlashMemoryType(Message responseMessage)
+        internal UInt32 ParseFlashMemoryType(Message responseMessage)
         {
-            return ParseUInt32(responseMessage, 0x3D, 0x01);
+            return ParseUInt32WithSubMode(responseMessage, 0x3D, 0x01);
         }
 
         /// <summary>
@@ -83,9 +83,8 @@ namespace PcmHacking
         /// <summary>
         /// Parse the response to a CRC query.
         /// </summary>
-        internal Response<UInt32> ParseCrc(Message responseMessage, UInt32 address, UInt32 size)
+        internal UInt32 ParseCrc(Message responseMessage, UInt32 address, UInt32 size)
         {
-            ResponseStatus status;
             byte[] expected = new byte[]
             {
                 Priority.Physical0,
@@ -101,21 +100,22 @@ namespace PcmHacking
                 unchecked((byte)address),
             };
 
-            if (!TryVerifyInitialBytes(responseMessage, expected, out status))
+            byte[] responseBytes = responseMessage.GetBytes();
+
+            if (!VerifyInitialBytes(responseBytes, expected))
             {
                 byte[] refused = {  Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.NegativeResponse, 0x3D, 0x02 };
-                if (TryVerifyInitialBytes(responseMessage, refused, out status))
+                if (VerifyInitialBytes(responseBytes, refused))
                 {
-                    return Response.Create(ResponseStatus.Refused, (UInt32)0);
+                    throw new ObdException("PCM Refused CRC", ObdExceptionReason.Refused);
                 }
 
-                return Response.Create(status, (UInt32)0);
+                throw new ObdException($"Unable to verify CRC. Got {responseBytes}", ObdExceptionReason.UnexpectedResponse);
             }
 
-            byte[] responseBytes = responseMessage.GetBytes();
             if (responseBytes.Length < 15)
             {
-                return Response.Create(ResponseStatus.Truncated, (UInt32)0);
+                throw new ObdException($"CRC Response Truncated. Got {responseBytes}", ObdExceptionReason.Refused);
             }
 
             int crc =
@@ -124,7 +124,7 @@ namespace PcmHacking
                 (responseBytes[13] << 8) |
                 responseBytes[14];
 
-            return Response.Create(ResponseStatus.Success, (UInt32)crc);
+            return (UInt32)crc;
         }
 
         /// <summary>
@@ -148,7 +148,7 @@ namespace PcmHacking
         /// <summary>
         /// Find out whether an erase request was successful.
         /// </summary>
-        internal Response<byte> ParseFlashEraseBlock(Message message)
+        internal byte ParseFlashEraseBlock(Message message)
         {
             return ParseByte(message, 0x3D, 0x05);
         }

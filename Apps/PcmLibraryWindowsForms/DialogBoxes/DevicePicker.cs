@@ -323,16 +323,9 @@ namespace PcmHacking
 
             this.status.Text = device.ToString() + " created.";
             
-            bool initialized = await device.Initialize();
-            if (initialized)
-            {
-                this.status.Text = device.ToString() + " initialized successfully.";
-            }
-            else
-            {
-                this.status.Text = "Unable to initalize " + device.ToString();
-            }
-
+            await device.Initialize();
+            this.status.Text = device.ToString() + " initialized successfully.";
+            
             device.Dispose();
         }
     }

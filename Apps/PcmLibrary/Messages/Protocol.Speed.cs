@@ -66,35 +66,29 @@ namespace PcmHacking
             return new HighSpeedPermissionResult() { IsValid = false };
         }
 
-        public Response<bool> ParseHighSpeedRefusal(Message message)
+        public bool ParseHighSpeedRefusal(Message message)
         {
             byte[] actual = message.GetBytes();
-            byte[] refusal = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Broadcast, Mode.HighSpeedPrepare + Mode.Response };
 
             // Priority
-            if (actual[0] != refusal[0])
+            if (actual[0] != Priority.Physical0)
             {
-                return Response.Create(ResponseStatus.UnexpectedResponse, false);
+                throw new ObdException($"High speed refusal, invalid priority: {actual[0]}", ObdExceptionReason.UnexpectedResponse);
             }
 
             // Destination
-            if (actual[1] != refusal[1])
+            if (actual[1] != DeviceId.Tool)
             {
-                return Response.Create(ResponseStatus.UnexpectedResponse, false);
+                throw new ObdException($"High speed refusal, invalid destination: {actual[1]}", ObdExceptionReason.UnexpectedResponse);
             }
 
             // Source
-            byte moduleId = refusal[2];
-
-            if ((actual[3] == Mode.Rejected) || (actual[3] == Mode.NegativeResponse))
+            if ((actual[3] == Mode.Rejected || actual[3] == Mode.NegativeResponse) && actual[4] == Mode.HighSpeed)
             {
-                if (actual[4] == Mode.HighSpeed)
-                {
-                    return Response.Create(ResponseStatus.Success, true);
-                }
+                return true;
             }
 
-            return Response.Create(ResponseStatus.UnexpectedResponse, false);
+            return false;
         }
     }
 }

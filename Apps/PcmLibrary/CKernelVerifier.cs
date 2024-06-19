@@ -100,11 +100,7 @@ namespace PcmHacking
 
                     await this.vehicle.SendToolPresentNotification();
 
-                    if (!await this.vehicle.SendMessage(query))
-                    {
-                        this.logger.AddUserMessage($"CRC query failed reading range {range.Address.ToString("X8")} / {range.Size.ToString("X8")}");
-                        continue;
-                    }
+                    await this.vehicle.SendMessage(query);
 
                     int maxAttempts = 5;
                     Message response = await this.vehicle.ReceiveMessage();
@@ -126,17 +122,9 @@ namespace PcmHacking
                         }
                     }
 
-                    Response<UInt32> crcResponse = this.protocol.ParseCrc(response, range.Address, range.Size);
-                    if (crcResponse.Status != ResponseStatus.Success)
-                    {
-                        this.logger.AddUserMessage("Unable to get CRC for memory range " + range.Address.ToString("X8") + " / " + range.Size.ToString("X8"));
-                        successForAllRanges = false;
-                        continue;
-                    }
+                    range.ActualCrc = this.protocol.ParseCrc(response, range.Address, range.Size);
 
                     this.vehicle.ClearDeviceMessageQueue();
-
-                    range.ActualCrc = crcResponse.Value;
 
                     this.logger.AddUserMessage(
                         string.Format(
@@ -216,7 +204,12 @@ namespace PcmHacking
                         }
 
                         await this.vehicle.SendToolPresentNotification();
-                        if (!await this.vehicle.SendMessage(query))
+
+                        try
+                        {
+                            await this.vehicle.SendMessage(query);
+                        }
+                        catch (ObdException)
                         {
                             continue;
                         }
@@ -228,16 +221,17 @@ namespace PcmHacking
                             continue;
                         }
 
-                        Response<UInt32> crcResponse = this.protocol.ParseCrc(response, range.Address, range.Size);
-                        if (crcResponse.Status != ResponseStatus.Success)
+                        try
+                        {
+                            crc = this.protocol.ParseCrc(response, range.Address, range.Size);
+                            success = true;
+                            break;
+                        }
+                        catch (ObdException)
                         {
                             await Task.Delay(retryDelay);
                             continue;
-                        }
-
-                        success = true;
-                        crc = crcResponse.Value;
-                        break;
+                        }                        
                     }
 
                     logger.StatusUpdateProgressBar(0, false);

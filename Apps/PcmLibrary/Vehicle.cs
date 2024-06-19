@@ -159,11 +159,14 @@ namespace PcmHacking
         /// <summary>
         /// Re-initialize the device.
         /// </summary>
-        public async Task<bool> ResetConnection()
+        public async Task ResetConnection()
         {
-            Task<bool> task = this.device.Initialize();
-            bool completedWithoutTimeout = await task.AwaitWithTimeout(TimeSpan.FromSeconds(10));
-            return task.Result;
+            var task = this.device.Initialize();
+
+            if (!await task.AwaitWithTimeout(TimeSpan.FromSeconds(10)))
+            {
+                throw new ObdException("Timed out waiting for initialize while resetting connection.", ObdExceptionReason.Timeout);
+            }
         }
 
         /// <summary>
@@ -214,7 +217,7 @@ namespace PcmHacking
         /// </summary>
         public Query<T> CreateQuery<T>(
             Func<Message> generator, 
-            Func<Message,Response<T>> parser, 
+            Func<Message,T> parser, 
             CancellationToken cancellationToken)
         {
             return new Query<T>(
@@ -226,9 +229,9 @@ namespace PcmHacking
                 this.notifier);
         }
 
-        public async Task<bool> SendMessage(Message message)
+        public async Task SendMessage(Message message)
         {
-            return await this.device.SendMessage(message);
+            await this.device.SendMessage(message);
         }
 
         public async Task<Message> ReceiveMessage()
@@ -247,14 +250,16 @@ namespace PcmHacking
 
             for (int iterations = 0; iterations < 10; iterations++)
             {
-                await this.TrySendMessage(new Message(new byte[] { Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, 0x62 }), "recovery query", 2);
+                await this.SendMessage(new Message(new byte[] { Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, 0x62 }));
+
                 Message response = await this.device.ReceiveMessage();
+
                 if (response == null)
                 {
                     continue;
                 }
 
-                if (this.protocol.ParseRecoveryModeBroadcast(response).Value == true)
+                if (this.protocol.ValidateRecoveryModeBroadcast(response))
                 {
                     return true;
                 }
@@ -275,11 +280,7 @@ namespace PcmHacking
             this.logger.AddDebugMessage("Sending seed request.");
             Message seedRequest = this.protocol.CreateSeedRequest();
 
-            if (!await this.TrySendMessage(seedRequest, "seed request"))
-            {
-                this.logger.AddUserMessage("Unable to send seed request.");
-                return false;
-            }
+            await this.SendMessage(seedRequest);
 
             bool seedReceived = false;
             UInt16 seedValue = 0;
@@ -300,15 +301,19 @@ namespace PcmHacking
                 }
 
                 this.logger.AddDebugMessage("Parsing seed value.");
-                Response<UInt16> seedValueResponse = this.protocol.ParseSeed(seedResponse.GetBytes());
-                if (seedValueResponse.Status == ResponseStatus.Success)
+
+                try
                 {
-                    seedValue = seedValueResponse.Value;
+                    UInt16 seedValueResponse = this.protocol.ParseSeed(seedResponse.GetBytes());
+
+                    seedValue = seedValueResponse;
                     seedReceived = true;
                     break;
                 }
-
-                this.logger.AddDebugMessage("Unable to parse seed response. Attempt #" + attempt.ToString());
+                catch (ObdException ex)
+                {
+                    this.logger.AddDebugMessage($"Unable to parse seed response. Attempt #{attempt}, exception {ex.Message}");
+                }
             }
 
             if (!seedReceived)
@@ -335,13 +340,10 @@ namespace PcmHacking
             }
 
             this.logger.AddDebugMessage("Sending unlock request (" + seedValue.ToString("X4") + ", " + key.ToString("X4") + ")");
+            
             Message unlockRequest = this.protocol.CreateUnlockRequest(key);
-            if (!await this.TrySendMessage(unlockRequest, "unlock request"))
-            {
-                this.logger.AddDebugMessage("Unable to send unlock request.");
-                return false;
-            }
-
+            await this.SendMessage(unlockRequest);
+            
             for (int attempt = 1; attempt < MaxReceiveAttempts; attempt++)
             {
                 Message unlockResponse = await this.device.ReceiveMessage();
@@ -351,34 +353,16 @@ namespace PcmHacking
                     continue;
                 }
 
-                Response<bool> result = this.protocol.ParseUnlockResponse(unlockResponse.GetBytes(), out string errorMessage);
-                if (errorMessage == null)
-                {
-                    return result.Value;
-                }
-
-                this.logger.AddUserMessage(errorMessage);
-            }
-
-            this.logger.AddUserMessage("Unable to process unlock response.");
-            return false;
-        }
-
-        /// <summary>
-        /// Try to send a message, retrying if necessary.
-        /// </summary
-        private async Task<bool> TrySendMessage(Message message, string description, int maxAttempts = MaxSendAttempts)
-        {
-            for (int attempt = 1; attempt <= maxAttempts; attempt++)
-            {
-                if (await this.device.SendMessage(message))
+                var result = this.protocol.ParseUnlockResponse(unlockResponse.GetBytes());
+                if (result == null)
                 {
                     return true;
                 }
 
-                this.logger.AddDebugMessage("Unable to send " + description + " message. Attempt #" + attempt.ToString());
+                this.logger.AddUserMessage(result);
             }
 
+            this.logger.AddUserMessage("Unable to process unlock response.");
             return false;
         }
 
@@ -413,14 +397,11 @@ namespace PcmHacking
         /// <summary>
         /// Read messages from the device, ignoring irrelevant messages.
         /// </summary>
-        private async Task<bool> WaitForSuccess(Func<Message, Response<bool>> filter, CancellationToken cancellationToken, int attempts = MaxReceiveAttempts)
+        private async Task<bool> WaitForSuccess(Action<Message> validate, CancellationToken cancellationToken, int attempts = MaxReceiveAttempts)
         {
             for(int attempt = 1; attempt<=attempts; attempt++)
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
+                cancellationToken.ThrowIfCancellationRequested();
 
                 Message message = await this.device.ReceiveMessage();
                 if(message == null)
@@ -429,15 +410,21 @@ namespace PcmHacking
                     continue;
                 }
 
-                Response<bool> response = filter(message);
-                if ((response.Status != ResponseStatus.Success) && (response.Status != ResponseStatus.Refused))
+                try
                 {
-                    this.logger.AddDebugMessage("Ignoring message: " + response.Status + "  " + message.ToString());
-                    continue;
+                    validate(message);
+                }
+                catch (ObdException ex)
+                {
+                    if (ex.Reason != ObdExceptionReason.Refused)
+                    {
+                        throw;
+                    }
+
+                    this.logger.AddDebugMessage($"Ignoring message: {message}");
                 }
 
-                this.logger.AddDebugMessage("Found response, " + response.Status);
-                return response.Value;
+                return true;
             }
 
             return false;
@@ -446,26 +433,18 @@ namespace PcmHacking
         /// <summary>
         /// Send and receive a read-memory request.
         /// </summary>
-        public async Task<Response<byte[]>> ReadMemory(
+        public async Task<byte[]> ReadMemory(
             Func<Message> messageFactory,
-            Func<Message, Response<byte[]>> messageParser,
+            Func<Message, byte[]> messageParser,
             CancellationToken cancellationToken)
         {
             Message message = messageFactory();
 
-            if (!await this.device.SendMessage(message))
-            {
-                this.logger.AddDebugMessage("Unable to send read request.");
-                return Response.Create<byte[]>(ResponseStatus.Error, new byte[0]);
-            }
+            await this.device.SendMessage(message);
 
-            ResponseStatus lastStatus = ResponseStatus.Error;
             for (int receiveAttempt = 1; receiveAttempt <= MaxReceiveAttempts; receiveAttempt++)
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    return Response.Create<byte[]>(ResponseStatus.Cancelled, new byte[0]);
-                }
+                cancellationToken.ThrowIfCancellationRequested();
 
                 Message payloadMessage = await this.device.ReceiveMessage();
                 if (payloadMessage == null)
@@ -476,17 +455,10 @@ namespace PcmHacking
 
                 this.logger.AddDebugMessage("Processing message");
 
-                Response<byte[]> payloadResponse = messageParser(payloadMessage);
-                if (payloadResponse.Status == ResponseStatus.Success)
-                {
-                    return payloadResponse;
-                }
-
-                lastStatus = payloadResponse.Status;
-                this.logger.AddDebugMessage("Unable to process response: " + lastStatus + " " + payloadMessage.ToString());
+                return messageParser(payloadMessage);
             }
 
-            return Response.Create<byte[]>(lastStatus, new byte[0]);
+            throw new ObdException("Reached maximum attempts waiting to read memory.", ObdExceptionReason.Timeout);
         }
     }
 }

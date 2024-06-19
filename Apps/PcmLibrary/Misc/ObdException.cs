@@ -37,11 +37,11 @@ namespace PcmHacking
         Refused = 5,
     }
 
-    internal class ObdException : Exception
+    public class ObdException : Exception
     {
         public ObdExceptionReason Reason { get; private set; }
 
-        public ObdException(string message, ObdExceptionReason reason) : base(message)
+        public ObdException(string message, ObdExceptionReason reason, Exception innerException = null) : base(message, innerException)
         {
             this.Reason = reason;
         }

@@ -114,17 +114,17 @@ namespace PcmHacking
         /// Set the timeout to the device. If this is set too low, the device
         /// will return 'No Data'. ELM327 is limited to 1020 milliseconds maximum.
         /// </summary>
-        public virtual async Task<bool> SetTimeoutMilliseconds(int milliseconds)
+        public virtual async Task SetTimeoutMilliseconds(int milliseconds)
         {
            int parameter = Math.Min(Math.Max(1, (milliseconds / 4)), 255);
            string value = parameter.ToString("X2");
-           return await this.SendAndVerify("AT ST " + value, "OK");
+           await SendAndVerify("AT ST " + value, "OK");
         }
 
         /// <summary>
         /// Send a message, do not expect a response.
         /// </summary>
-        public virtual Task<bool> SendMessage(Message message)
+        public virtual Task SendMessage(Message message)
         {
             throw new NotImplementedException("This is only implemented by derived classes.");
         }
@@ -167,18 +167,16 @@ namespace PcmHacking
         /// This is primarily for use in the Initialize method, where we're talking to the 
         /// interface device rather than the PCM.
         /// </remarks>
-        public async Task<bool> SendAndVerify(string message, string expectedResponse)
+        public async Task SendAndVerify(string message, string expectedResponse)
         {
             string actualResponse = await this.SendRequest(message);
 
             if (string.Equals(actualResponse, expectedResponse))
             {
                 this.Logger.AddDebugMessage(actualResponse);
-                return true;
             }
 
-            this.Logger.AddDebugMessage("Did not recieve expected response. Received \"" + actualResponse + "\" expected \"" + expectedResponse + "\"");
-            return false;
+            throw new ObdException($"Did not recieve expected response. Sent \"{message}\". Received \"{actualResponse}\". Expected \"{expectedResponse}\"", ObdExceptionReason.UnexpectedResponse);
         }
 
         /// <summary>
@@ -232,7 +230,7 @@ namespace PcmHacking
         /// <summary>
         /// Collects a line with ReadELMLine() and converts it to a Message
         /// </summary>
-        protected async Task<Response<Message>> ReadELMPacket()
+        protected async Task<Message> ReadELMPacket()
         {
             //this.Logger.AddDebugMessage("Trace: ReadELMPacket");
 
@@ -240,37 +238,36 @@ namespace PcmHacking
 
             byte[] message = response.ToBytes();
 
-            return Response.Create(ResponseStatus.Success, new Message(message));
+            return new Message(message);
         }
 
         /// <summary>
         /// Process responses from the ELM/ST devices.
         /// </summary>
-        protected bool ProcessResponse(string rawResponse, string context, bool allowEmpty = false)
+        protected void ProcessResponse(string rawResponse, string context, bool allowEmpty = false)
         {
             if (string.IsNullOrWhiteSpace(rawResponse))
             {
                 if (allowEmpty)
                 {
                     this.Logger.AddDebugMessage("Empty response to " + context + ". OK.");
-                    return true;
+                    return;
                 }
                 else
                 {
-                    this.Logger.AddDebugMessage("Empty response to " + context + ". That's not OK.");
-                    return false;
+                    throw new ObdException($"Empty response to {context}. That's not OK.", ObdExceptionReason.UnexpectedResponse);
                 }
             }
 
             if (rawResponse == "OK")
             {
-                return true;
+                return;
             }
 
             // We sent successfully, but the PCM didn't reply immediately.
             if (rawResponse == "NO DATA")
             {
-                return true;
+                return;
             }
 
             string[] segments = rawResponse.Split('<');
@@ -293,13 +290,13 @@ namespace PcmHacking
                         this.enqueue(response);
                     }
 
-                    return true;
+                    return;
                 }
 
                 if (segment.EndsWith("OK"))
                 {
                     this.Logger.AddDebugMessage("WTF: Response not valid, but ends with OK.");
-                    return true;
+                    return;
                 }
 
                 this.Logger.AddDebugMessage(
@@ -309,7 +306,7 @@ namespace PcmHacking
                         segment));
             }
 
-            return false;
+            throw new ObdException($"invalid response to {context}. Recieved {rawResponse}.", ObdExceptionReason.UnexpectedResponse);
         }
 
     }

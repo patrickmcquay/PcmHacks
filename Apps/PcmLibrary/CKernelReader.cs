@@ -37,7 +37,7 @@ namespace PcmHacking
         /// Read the full contents of the PCM.
         /// Assumes the PCM is unlocked and we're ready to go.
         /// </summary>
-        public async Task<Response<Stream>> ReadContents(CancellationToken cancellationToken)
+        public async Task<Stream> ReadContents(CancellationToken cancellationToken)
         {
             try
             {
@@ -49,11 +49,7 @@ namespace PcmHacking
                 if (this.vehicle.Enable4xReadWrite)
                 {
                     // if the vehicle bus switches but the device does not, the bus will need to time out to revert back to 1x, and the next steps will fail.
-                    if (!await this.vehicle.VehicleSetVPW4x(VpwSpeed.FourX))
-                    {
-                        this.logger.AddUserMessage("Stopping here because we were unable to switch to 4X.");
-                        return Response.Create(ResponseStatus.Error, (Stream)null);
-                    }
+                    await this.vehicle.VehicleSetVPW4x();
                 }
                 else
                 {
@@ -80,18 +76,14 @@ namespace PcmHacking
 
                     if (cancellationToken.IsCancellationRequested)
                     {
-                        return Response.Create(ResponseStatus.Cancelled, (Stream)null);
+                        return null;
                     }
 
                     await this.vehicle.SendToolPresentNotification();
 
                     if (!await this.vehicle.PCMExecute(this.pcmInfo, file, cancellationToken))
                     {
-                        logger.AddUserMessage("Failed to upload loader to PCM");
-
-                        return new Response<Stream>(
-                            cancellationToken.IsCancellationRequested ? ResponseStatus.Cancelled : ResponseStatus.Error,
-                            null);
+                        throw new ObdException("Failed to upload loader to PCM", cancellationToken.IsCancellationRequested ? ObdExceptionReason.Cancelled : ObdExceptionReason.Error);
                     }
 
                     logger.AddUserMessage("Loader uploaded to PCM succesfully.");
@@ -111,18 +103,14 @@ namespace PcmHacking
 
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    return Response.Create(ResponseStatus.Cancelled, (Stream)null);
+                    return null;
                 }
 
                 await this.vehicle.SendToolPresentNotification();
 
                 if (!await this.vehicle.PCMExecute(this.pcmInfo, file, cancellationToken))
                 {
-                    logger.AddUserMessage("Failed to upload kernel to PCM");
-
-                    return new Response<Stream>(
-                        cancellationToken.IsCancellationRequested ? ResponseStatus.Cancelled : ResponseStatus.Error,
-                        null);
+                    throw new ObdException("Failed to upload kernel to PCM", cancellationToken.IsCancellationRequested ? ObdExceptionReason.Cancelled : ObdExceptionReason.Error);
                 }
 
                 logger.AddUserMessage("Kernel uploaded to PCM succesfully. Requesting data...");
@@ -141,10 +129,11 @@ namespace PcmHacking
                 await this.vehicle.SetDeviceTimeout(TimeoutScenario.ReadMemoryBlock);
 
                 byte[] image = new byte[pcmInfo.ImageSize];
-                int retryCount = 0;
+                int totalRetryCount = 0;
                 int startAddress = 0;
                 int bytesRemaining = pcmInfo.ImageSize;
                 int blockSize = this.vehicle.DeviceMaxReceiveSize - 10 - 2; // allow space for the header and block checksum
+
                 if (blockSize > this.pcmInfo.KernelMaxBlockSize)
                 {
                     blockSize = this.pcmInfo.KernelMaxBlockSize;
@@ -155,7 +144,7 @@ namespace PcmHacking
                 {
                     if (cancellationToken.IsCancellationRequested)
                     {
-                        return Response.Create(ResponseStatus.Cancelled, (Stream)null);
+                        return null;
                     }
 
                     // The read kernel needs a short message here for reasons unknown. Without it, it will RX 2 messages then drop one.
@@ -177,30 +166,29 @@ namespace PcmHacking
                         startTime = DateTime.Now;
                     }
 
-                    Response<bool> readResponse = await TryReadBlock(
-                        image, 
-                        blockSize, 
-                        startAddress,
-                        startTime,
-                        cancellationToken);
-                    if (readResponse.Status != ResponseStatus.Success)
+                    this.logger.AddDebugMessage(string.Format("Reading from {0} / 0x{0:X}, length {1} / 0x{1:X}", startAddress, blockSize));
+
+                    for (int blockRetryCount = 0; blockRetryCount < Vehicle.MaxSendAttempts && !cancellationToken.IsCancellationRequested; blockRetryCount++)
                     {
-                        this.logger.AddUserMessage(
-                            string.Format(
-                                "Unable to read block from {0} to {1}",
-                                startAddress,
-                                (startAddress + blockSize) - 1));
-                        return new Response<Stream>(ResponseStatus.Error, null);
+                        if (await TryReadBlock(image, blockSize, startAddress, startTime, cancellationToken))
+                        {
+                            break; 
+                        }
+
+                        if (blockRetryCount == Vehicle.MaxSendAttempts)
+                        {
+                            throw new ObdException($"Tried to read block {Vehicle.MaxSendAttempts} times, read failed.", ObdExceptionReason.Error);
+                        }
+
+                        logger.StatusUpdateRetryCount((totalRetryCount > 0) ? totalRetryCount.ToString() + ((totalRetryCount > 1) ? " Retries" : " Retry") : string.Empty);
+                        totalRetryCount++;
                     }
 
                     startAddress += blockSize;
-                    retryCount += readResponse.RetryCount;
-
-                    logger.StatusUpdateRetryCount((retryCount > 0) ? retryCount.ToString() + ((retryCount > 1) ? " Retries" : " Retry") : string.Empty);
                 }
 
                 logger.AddUserMessage("Read complete.");
-                Utility.ReportRetryCount("Read", retryCount, pcmInfo.ImageSize, this.logger);
+                Utility.ReportRetryCount("Read", totalRetryCount, pcmInfo.ImageSize, this.logger);
 
                 if (this.pcmInfo.FlashCRCSupport && this.pcmInfo.FlashIDSupport)
                 {
@@ -234,13 +222,11 @@ namespace PcmHacking
                 await this.vehicle.Cleanup(); // Not sure why this does not get called in the finally block on successfull read?
 
                 MemoryStream stream = new MemoryStream(image);
-                return new Response<Stream>(ResponseStatus.Success, stream);
+                return stream;
             }
             catch(Exception exception)
             {
-                this.logger.AddUserMessage("Something went wrong. " + exception.Message);
-                this.logger.AddDebugMessage(exception.ToString());
-                return new Response<Stream>(ResponseStatus.Error, null);
+                throw new ObdException("Something went wrong.", ObdExceptionReason.Error, exception);
             }
             finally
             {
@@ -253,74 +239,53 @@ namespace PcmHacking
         /// <summary>
         /// Try to read a block of PCM memory.
         /// </summary>
-        private async Task<Response<bool>> TryReadBlock(
+        private async Task<bool> TryReadBlock(
             byte[] image, 
             int length, 
             int startAddress, 
             DateTime startTime,
             CancellationToken cancellationToken)
         {
-            this.logger.AddDebugMessage(string.Format("Reading from {0} / 0x{0:X}, length {1} / 0x{1:X}", startAddress, length));
 
-            int retryCount = 0;
-            for (; retryCount < Vehicle.MaxSendAttempts; retryCount++)
+
+            byte[] readResponse = await this.vehicle.ReadMemory(
+                () => this.protocol.CreateReadRequest(startAddress, length),
+                (payloadMessage) => this.protocol.ParsePayload(payloadMessage, length, startAddress),
+                cancellationToken);
+
+            byte[] payload = readResponse;
+
+            if (payload.Length != length)
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
-
-                Response<byte[]> readResponse = await this.vehicle.ReadMemory(
-                    () => this.protocol.CreateReadRequest(startAddress, length),
-                    (payloadMessage) => this.protocol.ParsePayload(payloadMessage, length, startAddress),
-                    cancellationToken);
-
-                if(readResponse.Status != ResponseStatus.Success)
-                {
-                    this.logger.AddDebugMessage("Unable to read segment: " + readResponse.Status);
-                    continue;
-                }
-
-                byte[] payload = readResponse.Value;
-
-                if (payload.Length != length)
-                {
-                    this.logger.AddUserMessage(
-                        string.Format(
-                            "Expected {0} bytes, received {1} bytes.",
-                            length,
-                            payload.Length));
-                    return Response.Create(ResponseStatus.Truncated, false);
-                }
-
-                Buffer.BlockCopy(payload, 0, image, startAddress, payload.Length);
-
-                TimeSpan elapsed = DateTime.Now - startTime;
-                string timeRemaining = string.Empty;
-
-                UInt32 bytesPerSecond = 0;
-                UInt32 bytesRemaining = 0;
-
-                bytesPerSecond = (UInt32)(startAddress / elapsed.TotalSeconds);
-                bytesRemaining = (UInt32)(image.Length - startAddress);
-
-                // Don't divide by zero.
-                if (bytesPerSecond > 0)
-                {
-                    UInt32 secondsRemaining = (UInt32)(bytesRemaining / bytesPerSecond);
-                    timeRemaining = TimeSpan.FromSeconds(secondsRemaining).ToString("mm\\:ss");
-                }
-
-                logger.StatusUpdateActivity($"Reading {payload.Length} bytes from 0x{startAddress:X6}");
-                logger.StatusUpdatePercentDone((startAddress * 100 / image.Length > 0) ? $"{startAddress * 100 / image.Length}%" : string.Empty);
-                logger.StatusUpdateTimeRemaining($"T-{timeRemaining}");
-                logger.StatusUpdateKbps((bytesPerSecond > 0) ? $"{(double)bytesPerSecond * 8.00 / 1000.00:0.00} Kbps" : string.Empty);
-                logger.StatusUpdateProgressBar((double)(startAddress + payload.Length) / image.Length, true);
-
-                return Response.Create(ResponseStatus.Success, true, retryCount);
+                throw new ObdException($"Expected {length} bytes, received {payload.Length} bytes.", ObdExceptionReason.Truncated);
             }
 
-            return Response.Create(ResponseStatus.Error, false, retryCount);
+            Buffer.BlockCopy(payload, 0, image, startAddress, payload.Length);
+
+            TimeSpan elapsed = DateTime.Now - startTime;
+            string timeRemaining = string.Empty;
+
+            UInt32 bytesPerSecond = 0;
+            UInt32 bytesRemaining = 0;
+
+            bytesPerSecond = (UInt32)(startAddress / elapsed.TotalSeconds);
+            bytesRemaining = (UInt32)(image.Length - startAddress);
+
+            // Don't divide by zero.
+            if (bytesPerSecond > 0)
+            {
+                UInt32 secondsRemaining = (UInt32)(bytesRemaining / bytesPerSecond);
+                timeRemaining = TimeSpan.FromSeconds(secondsRemaining).ToString("mm\\:ss");
+            }
+
+            logger.StatusUpdateActivity($"Reading {payload.Length} bytes from 0x{startAddress:X6}");
+            logger.StatusUpdatePercentDone((startAddress * 100 / image.Length > 0) ? $"{startAddress * 100 / image.Length}%" : string.Empty);
+            logger.StatusUpdateTimeRemaining($"T-{timeRemaining}");
+            logger.StatusUpdateKbps((bytesPerSecond > 0) ? $"{(double)bytesPerSecond * 8.00 / 1000.00:0.00} Kbps" : string.Empty);
+            logger.StatusUpdateProgressBar((double)(startAddress + payload.Length) / image.Length, true);
+
+            return true;
+            
         }
     }
 }

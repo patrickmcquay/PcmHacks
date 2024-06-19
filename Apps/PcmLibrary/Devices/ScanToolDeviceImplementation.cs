@@ -194,18 +194,18 @@ namespace PcmHacking
         /// the same 1020 millisecond limit since it takes an integer milliseconds
         /// as a paramter.
         /// </summary>
-        public override async Task<bool> SetTimeoutMilliseconds(int milliseconds)
+        public override async Task SetTimeoutMilliseconds(int milliseconds)
         {
             if (milliseconds == -1)
             {
                 // This doesn't actually work yet, but I think it should be possible.
                 // To test this code path, change this value in the constructor:
                 // this.SupportsStreamLogging = false;
-                return await this.SendAndVerify("STMA", "");
+                await this.SendAndVerify("STMA", "");
             }
             else
             {
-                return await this.SendAndVerify("STPTO " + milliseconds, "OK");
+                await this.SendAndVerify("STPTO " + milliseconds, "OK");
             }           
         }
 
@@ -217,7 +217,7 @@ namespace PcmHacking
         /// of devices supports an "STPX" command that simplifies things a lot.
         /// Timeout adjustements are no longer needed, and longer packets are supported.
         /// </remarks>
-        public override async Task<bool> SendMessage(Message message)
+        public override async Task SendMessage(Message message)
         {
             byte[] messageBytes = message.GetBytes();
 
@@ -273,18 +273,16 @@ namespace PcmHacking
                 }
 
                 string dataResponse = await this.SendRequest(builder.ToString());
-                if (!this.ProcessResponse(dataResponse, "STPX with data", allowEmpty: responses == 0))
+                this.ProcessResponse(dataResponse, "STPX with data", responses == 0);
+                
+                if (dataResponse == string.Empty || dataResponse == "STOPPED" || dataResponse == "?")
                 {
-                    if (dataResponse == string.Empty || dataResponse == "STOPPED" || dataResponse == "?")
-                    {
-                        // These will happen if the bus is quiet, for example right after uploading the kernel.
-                        // They are traced during the SendRequest code. No need to repeat that message.
-                    }
-                    else
-                    {
-                        this.Logger.AddUserMessage("Unexpected response to STPX with data: " + dataResponse);
-                    }
-                    return false;
+                    // These will happen if the bus is quiet, for example right after uploading the kernel.
+                    // They are traced during the SendRequest code. No need to repeat that message.
+                }
+                else
+                {
+                    throw new ObdException("Unexpected response to STPX with data: " + dataResponse, ObdExceptionReason.UnexpectedResponse);
                 }
             }
             else
@@ -316,14 +314,8 @@ namespace PcmHacking
                 string data = builder.ToString();
                 string dataResponse = await this.SendRequest(data);
 
-                if (!this.ProcessResponse(dataResponse, "STPX payload", responses == 0))
-                {
-                    this.Logger.AddUserMessage("Unexpected response to STPX payload: " + dataResponse);
-                    return false;
-                }
+                this.ProcessResponse(dataResponse, "STPX payload", responses == 0);
             }
-
-            return true;
         }
 
         /// <summary>

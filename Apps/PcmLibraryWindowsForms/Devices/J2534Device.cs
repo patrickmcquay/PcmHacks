@@ -81,22 +81,24 @@ namespace PcmHacking
         // This needs to return Task<bool> for consistency with the Device base class.
         // However it doesn't do anything asynchronous, so to make the code more readable
         // it just wraps a private method that does the real work and returns a bool.
-        public override async Task<bool> Initialize()
+        public override Task Initialize()
         {
-            return await Task.FromResult(this.InitializeInternal());
+            this.InitializeInternal();
+
+            return Task.FromResult(true);
         }
 
         // This returns 'bool' for the sake of readability. That bool needs to be
         // wrapped in a Task object for the public Initialize method.
-        private bool InitializeInternal()
+        private void InitializeInternal()
         {
             Filters = new List<ulong>();
 
             this.Logger.AddUserMessage("Initializing " + this.ToString());
 
-            Response<J2534Err> m; // hold returned messages for processing
-            Response<bool> m2;
-            Response<double> volts;
+            J2534Err m; // hold returned messages for processing
+            bool m2;
+            double volts;
 
             // Check J2534 API
             //this.Logger.AddDebugMessage(J2534Port.Functions.ToString());
@@ -105,85 +107,40 @@ namespace PcmHacking
             if (IsLoaded == true)
             {
                 // Disconnect protocol before disconnecting tool.
-                m = DisconnectFromProtocol();
-                if (m.Status != ResponseStatus.Success)
-                {
-                    this.Logger.AddUserMessage("Error disconnecting from protocol.");
-                    return false;
-                }
+                DisconnectFromProtocol();
                 this.Logger.AddDebugMessage("Successfully disconnected from protocol.");
 
                 // Disconnect tool before unloading DLL.
-                m = DisconnectTool();
-                if (m.Status != ResponseStatus.Success)
-                {
-                    this.Logger.AddUserMessage("Error disconnecting from tool.");
-                    return false;
-                }
+                DisconnectTool();
                 this.Logger.AddDebugMessage("Successfully disconnected from tool.");
 
                 // Unload DLL.
-                m2 = CloseLibrary();
-                if (m2.Status != ResponseStatus.Success)
-                {
-                    this.Logger.AddUserMessage("Error unloading DLL");
-                    return false;
-                }
+                CloseLibrary();
                 this.Logger.AddDebugMessage("Successfully unloaded DLL.");
             }
 
             // Connect to requested DLL
-            m2 = LoadLibrary(J2534Port.LoadedDevice);
-            if (m2.Status != ResponseStatus.Success)
-            {
-                this.Logger.AddUserMessage("Unable to load the J2534 DLL.");
-                return false;
-            }
+            LoadLibrary(J2534Port.LoadedDevice);
             this.Logger.AddUserMessage("Loaded DLL");
 
             // Connect to scantool
-            m = ConnectTool();
-            if (m.Status != ResponseStatus.Success)
-            {
-                this.Logger.AddUserMessage("Unable to connect to the device.");
-                return false;
-            }
-
+            ConnectTool();
             this.Logger.AddUserMessage("Connected to the device.");
             
             // Optional.. read API,firmware version ect here
             
             // Read voltage
             volts = ReadVoltage();
-            if (volts.Status != ResponseStatus.Success)
-            {
-                this.Logger.AddDebugMessage("Unable to read battery voltage.");
-            }
-            else
-            {
-                this.Logger.AddUserMessage("Battery Voltage is: " + volts.Value.ToString());
-            }
-
+            this.Logger.AddUserMessage("Battery Voltage is: " + volts.ToString());
+        
             // Set Protocol
-            m = ConnectToProtocol(ProtocolID.J1850VPW, BaudRate.J1850VPW_10400, ConnectFlag.NONE);
-            if (m.Status != ResponseStatus.Success)
-            {
-                this.Logger.AddUserMessage("Failed to set protocol, J2534 error code: 0x" + m.Value.ToString("X"));
-                return false;
-            }
+            ConnectToProtocol(ProtocolID.J1850VPW, BaudRate.J1850VPW_10400, ConnectFlag.NONE);
             this.Logger.AddDebugMessage("Protocol Set");
 
             // Set filter
-            m = SetFilter(0xFEFFFF, J2534Device.MessageFilter, 0, TxFlag.NONE, FilterType.PASS_FILTER);
-            if (m.Status != ResponseStatus.Success)
-            {
-                this.Logger.AddUserMessage("Failed to set filter, J2534 error code: 0x" + m.Value.ToString("X2"));
-                return false;
-            }
-
+            SetFilter(0xFEFFFF, J2534Device.MessageFilter, 0, TxFlag.NONE, FilterType.PASS_FILTER);
+            
             this.Logger.AddDebugMessage("Device initialization complete.");
-
-            return true;
         }
 
         /// <summary>
@@ -197,20 +154,21 @@ namespace PcmHacking
         /// <summary>
         /// This will process incoming messages for up to 500ms looking for a message
         /// </summary>
-        public async Task<Response<Message>> FindResponse(Message expected)
+        public async Task<Message> FindResponse(Message expected)
         {
-            //this.Logger.AddDebugMessage("FindResponse called");
             for (int iterations = 0; iterations < 5; iterations++)
             {
                 Message response = await this.ReceiveMessage();
+
                 if (Utility.CompareArraysPart(response.GetBytes(), expected.GetBytes()))
                 {
-                    return Response.Create(ResponseStatus.Success, response);
+                    return response;
                 }
+                
                 await Task.Delay(100);
             }
 
-            return Response.Create(ResponseStatus.Timeout, (Message)null);
+            throw new ObdException($"Timed out waiting for message. Expected: {expected}", ObdExceptionReason.Timeout);
         }
 
         /// <summary>
@@ -268,10 +226,8 @@ namespace PcmHacking
         /// <summary>
         /// Convert a Message to an J2534 formatted transmit, and send to the interface
         /// </summary>
-        private Response<J2534Err> SendNetworkMessage(Message message, TxFlag Flags)
+        private void SendNetworkMessage(Message message, TxFlag Flags)
         {
-            //this.Logger.AddDebugMessage("Trace: Send Network Packet");
-
             PassThruMsg TempMsg = new PassThruMsg(Protocol, Flags, message.GetBytes());
 
             int NumMsgs = 1;
@@ -279,24 +235,18 @@ namespace PcmHacking
             OBDError = J2534Port.Functions.WriteMsgs((int)ChannelID, ref TempMsg, ref NumMsgs, WriteTimeout);
             if (OBDError != J2534Err.STATUS_NOERROR)
             {
-                // Debug messages here...check why failed..
-                return Response.Create(ResponseStatus.Error, OBDError);
+                throw new ObdException(OBDError.ToString(), ObdExceptionReason.Error);
             }
-            return Response.Create(ResponseStatus.Success, OBDError);
         }
         
         /// <summary>
         /// Send a message, wait for a response, return the response.
         /// </summary>
-        public override Task<bool> SendMessage(Message message)
+        public override Task SendMessage(Message message)
         {
-            //this.Logger.AddDebugMessage("Send request called");
             this.Logger.AddDebugMessage("TX: " + message.GetBytes().ToHex());
-            Response<J2534Err> MyError = SendNetworkMessage(message,TxFlag.NONE);
-            if (MyError.Status != ResponseStatus.Success)
-            {
-                return Task.FromResult(false);
-            }
+            
+            SendNetworkMessage(message, TxFlag.NONE);
 
             return Task.FromResult(true);
         }
@@ -304,69 +254,59 @@ namespace PcmHacking
         /// <summary>
         /// Load in dll
         /// </summary>
-        private Response<bool> LoadLibrary(J2534DotNet.J2534Device TempDevice)
+        private void LoadLibrary(J2534DotNet.J2534Device TempDevice)
         {
             ToolName = TempDevice.Name;
             J2534Port.LoadedDevice = TempDevice;
-            if (J2534Port.Functions.LoadLibrary(J2534Port.LoadedDevice))
+
+            if (!J2534Port.Functions.LoadLibrary(J2534Port.LoadedDevice))
             {
-                return Response.Create(ResponseStatus.Success, true);
-            }
-            else
-            {
-                return Response.Create(ResponseStatus.Error, false);
+                throw new ObdException("Unable to load J2534 library", ObdExceptionReason.Error);
             }
         }
 
         /// <summary>
         /// Unload dll
         /// </summary>
-        private Response<bool> CloseLibrary()
+        private void CloseLibrary()
         {
-            if (J2534Port.Functions.FreeLibrary())
+            if (!J2534Port.Functions.FreeLibrary())
             {
-                return Response.Create(ResponseStatus.Success, true);
-            }
-            else
-            {
-                return Response.Create(ResponseStatus.Error, false);
+                throw new ObdException("Unable to free J2534 Library", ObdExceptionReason.Error);
             }
         }
 
         /// <summary>
         /// Connects to physical scantool
         /// </summary>
-        private Response<J2534Err> ConnectTool()
+        private void ConnectTool()
         {
             DeviceID = 0;
             ChannelID = 0;
             Filters.Clear();
             OBDError = 0;
             OBDError = J2534Port.Functions.Open(ref DeviceID);
+
             if (OBDError != J2534Err.STATUS_NOERROR)
             {
-                IsJ2534Open = false;
-                return Response.Create(ResponseStatus.Error, OBDError);
+                throw new ObdException(OBDError.ToString(), ObdExceptionReason.Error);
             }
-            else
-            {
-                IsJ2534Open = true;
-                return Response.Create(ResponseStatus.Success, OBDError);
-            }
+            
+            IsJ2534Open = true;
         }
 
         /// <summary>
         /// Disconnects from physical scantool
         /// </summary>
-        private Response<J2534Err> DisconnectTool()
+        private void DisconnectTool()
         {
             OBDError = J2534Port.Functions.Close((int)DeviceID);
             if (OBDError != J2534Err.STATUS_NOERROR)
             {
-                // Big problems, do something here
+                throw new ObdException(OBDError.ToString(), ObdExceptionReason.Error);
             }
+
             IsJ2534Open = false;
-            return Response.Create(ResponseStatus.Success, OBDError);
         }
 
         /// <summary>
@@ -401,55 +341,55 @@ namespace PcmHacking
         /// Connect to selected protocol
         /// Must provide protocol, speed, connection flags, recommended optional is pins
         /// </summary>
-        private Response<J2534Err> ConnectToProtocol(ProtocolID ReqProtocol, BaudRate Speed, ConnectFlag ConnectFlags)
+        private void ConnectToProtocol(ProtocolID ReqProtocol, BaudRate Speed, ConnectFlag ConnectFlags)
         {
             OBDError = J2534Port.Functions.Connect(DeviceID, ReqProtocol,  ConnectFlags,  Speed, ref ChannelID);
             if (OBDError != J2534Err.STATUS_NOERROR)
             {
-                return Response.Create(ResponseStatus.Error, OBDError);
+                throw new ObdException(OBDError.ToString(), ObdExceptionReason.Error);
             }
+
             Protocol = ReqProtocol;
             IsProtocolOpen = true;
-            return Response.Create(ResponseStatus.Success, OBDError);
         }
 
         /// <summary>
         /// Disconnect from protocol
         /// </summary>
-        private Response<J2534Err> DisconnectFromProtocol()
+        private void DisconnectFromProtocol()
         {
             OBDError = J2534Port.Functions.Disconnect((int)ChannelID);
             if (OBDError != J2534Err.STATUS_NOERROR)
             {
-                return Response.Create(ResponseStatus.Error, OBDError);
+                throw new ObdException(OBDError.ToString(), ObdExceptionReason.Error);
             }
+
             IsProtocolOpen = false;
-            return Response.Create(ResponseStatus.Success, OBDError);
         }
 
         /// <summary>
         /// Read battery voltage
         /// </summary>
-        public Response<double> ReadVoltage()
+        public double ReadVoltage()
         {
-            double Volts = 0;
             int VoltsAsInt = 0;
+
             OBDError = J2534Port.Functions.ReadBatteryVoltage((int)DeviceID, ref VoltsAsInt);
+
             if (OBDError != J2534Err.STATUS_NOERROR)
             {
-                return Response.Create(ResponseStatus.Error, Volts);
+                throw new ObdException(OBDError.ToString(), ObdExceptionReason.Error);
             }
             else
             {
-                Volts = VoltsAsInt / 1000.0;
-                return Response.Create(ResponseStatus.Success, Volts);
+                return VoltsAsInt / 1000.0;
             }
         }
 
         /// <summary>
         /// Set filter
         /// </summary>
-        private Response<J2534Err> SetFilter(UInt32 Mask,UInt32 Pattern,UInt32 FlowControl,TxFlag txflag,FilterType Filtertype)
+        private void SetFilter(UInt32 Mask,UInt32 Pattern,UInt32 FlowControl,TxFlag txflag,FilterType Filtertype)
         {
             PassThruMsg maskMsg = new PassThruMsg(Protocol, txflag, new Byte[] { (byte)(0xFF & (Mask >> 16)), (byte)(0xFF & (Mask >> 8)), (byte)(0xFF & Mask) });
             PassThruMsg patternMsg = new PassThruMsg(Protocol, txflag, new Byte[] { (byte)(0xFF & (Pattern >> 16)), (byte)(0xFF & (Pattern >> 8)), (byte)(0xFF & Pattern) });
@@ -458,10 +398,10 @@ namespace PcmHacking
 
             if (OBDError != J2534Err.STATUS_NOERROR)
             {
-                return Response.Create(ResponseStatus.Error, OBDError);
+                throw new ObdException(OBDError.ToString(), ObdExceptionReason.Error);
             }
+
             Filters.Add((ulong)tempfilter);
-            return Response.Create(ResponseStatus.Success, OBDError);
         }
 
         /// <summary>
@@ -470,7 +410,7 @@ namespace PcmHacking
         /// <remarks>
         /// The caller must also tell the PCM to switch speeds
         /// </remarks>
-        protected override Task<bool> SetVpwSpeedInternal(VpwSpeed newSpeed)
+        protected override Task SetVpwSpeedInternal(VpwSpeed newSpeed)
         {
             if (newSpeed == VpwSpeed.Standard)
             {
@@ -483,13 +423,6 @@ namespace PcmHacking
 
                 // Set Filter
                 SetFilter(0xFEFFFF, J2534Device.MessageFilter, 0, TxFlag.NONE, FilterType.PASS_FILTER);
-                //if (m.Status != ResponseStatus.Success)
-                //{
-                //    this.Logger.AddDebugMessage("Failed to set filter, J2534 error code: 0x" + m.Value.ToString("X2"));
-                //    return false;
-                //}
-
-
             }
             else
             {

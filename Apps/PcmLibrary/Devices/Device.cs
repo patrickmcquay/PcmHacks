@@ -218,7 +218,7 @@ namespace PcmHacking
         /// <summary>
         /// Make the device ready to communicate with the VPW bus.
         /// </summary>
-        public abstract Task<bool> Initialize();
+        public abstract Task Initialize();
 
         /// <summary>
         /// Set the timeout period to wait for responses to incoming messages.
@@ -228,7 +228,7 @@ namespace PcmHacking
         /// <summary>
         /// Send a message.
         /// </summary>
-        public abstract Task<bool> SendMessage(Message message);
+        public abstract Task SendMessage(Message message);
 
         /// <summary>
         /// Removes any messages that might be waiting in the incoming-message queue. Also clears the buffer.
@@ -280,19 +280,22 @@ namespace PcmHacking
                 return true;
             }
 
-            if (((newSpeed == VpwSpeed.FourX) && !this.Enable4xReadWrite) || (!await this.SetVpwSpeedInternal(newSpeed)))
+            if ((newSpeed == VpwSpeed.FourX && !this.Enable4xReadWrite))
             {
                 return false;
             }
 
+            await this.SetVpwSpeedInternal(newSpeed);
+
             this.Speed = newSpeed;
+
             return true;
         }
 
         /// <summary>
         /// Set the interface to low (false) or high (true) speed
         /// </summary>
-        protected abstract Task<bool> SetVpwSpeedInternal(VpwSpeed newSpeed);
+        protected abstract Task SetVpwSpeedInternal(VpwSpeed newSpeed);
 
         /// <summary>
         /// Clean up anything that this instance has allocated.

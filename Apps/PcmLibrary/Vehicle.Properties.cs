@@ -19,43 +19,34 @@ namespace PcmHacking
         /// <summary>
         /// Query the PCM's VIN.
         /// </summary>
-        public async Task<Response<string>> QueryVin()
+        public async Task<string> QueryVin()
         {
             await this.device.SetTimeout(TimeoutScenario.ReadProperty);
 
             this.device.ClearMessageQueue();
 
-            if (!await this.device.SendMessage(this.protocol.CreateVinRequest1()))
-            {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. Request for block 1 failed.");
-            }
+            await this.device.SendMessage(this.protocol.CreateVinRequest1());
 
             Message response1 = await this.device.ReceiveMessage();
             if (response1 == null)
             {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. No response to request for block 1.");
+                throw new ObdException("Unknown. No response to request for block 1.", ObdExceptionReason.Timeout);
             }
 
-            if (!await this.device.SendMessage(this.protocol.CreateVinRequest2()))
-            {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. Request for block 2 failed.");
-            }
+            await this.device.SendMessage(this.protocol.CreateVinRequest2());
 
             Message response2 = await this.device.ReceiveMessage();
             if (response2 == null)
             {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. No response to request for block 2.");
+                throw new ObdException("Unknown. No response to request for block 2.", ObdExceptionReason.Timeout);
             }
 
-            if (!await this.device.SendMessage(this.protocol.CreateVinRequest3()))
-            {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. Request for block 3 failed.");
-            }
+            await this.device.SendMessage(this.protocol.CreateVinRequest3());
 
             Message response3 = await this.device.ReceiveMessage();
             if (response3 == null)
             {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. No response to request for block 3.");
+                throw new ObdException("Unknown. No response to request for block 3.", ObdExceptionReason.Timeout);
             }
 
             return this.protocol.ParseVinResponses(response1.GetBytes(), response2.GetBytes(), response3.GetBytes());
@@ -64,43 +55,34 @@ namespace PcmHacking
         /// <summary>
         /// Query the PCM's Serial Number.
         /// </summary>
-        public async Task<Response<string>> QuerySerial()
+        public async Task<string> QuerySerial()
         {
             await this.device.SetTimeout(TimeoutScenario.ReadProperty);
 
             this.device.ClearMessageQueue();
 
-            if (!await this.device.SendMessage(this.protocol.CreateSerialRequest1()))
-            {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. Request for block 1 failed.");
-            }
+            await this.device.SendMessage(this.protocol.CreateSerialRequest1());
 
             Message response1 = await this.device.ReceiveMessage();
             if (response1 == null)
             {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. No response to request for block 1.");
+                throw new ObdException("Unknown. No response to request for block 1.", ObdExceptionReason.Timeout);
             }
 
-            if (!await this.device.SendMessage(this.protocol.CreateSerialRequest2()))
-            {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. Request for block 2 failed.");
-            }
+            await this.device.SendMessage(this.protocol.CreateSerialRequest2());
 
             Message response2 = await this.device.ReceiveMessage();
             if (response2 == null)
             {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. No response to request for block 2.");
+                throw new ObdException("Unknown. No response to request for block 2.", ObdExceptionReason.Timeout);
             }
 
-            if (!await this.device.SendMessage(this.protocol.CreateSerialRequest3()))
-            {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. Request for block 3 failed.");
-            }
+            await this.device.SendMessage(this.protocol.CreateSerialRequest3());
 
             Message response3 = await this.device.ReceiveMessage();
             if (response3 == null)
             {
-                return Response.Create(ResponseStatus.Timeout, "Unknown. No response to request for block 3.");
+                throw new ObdException("Unknown. No response to request for block 3.", ObdExceptionReason.Timeout);
             }
 
             return this.protocol.ParseSerialResponses(response1, response2, response3);
@@ -109,7 +91,7 @@ namespace PcmHacking
         /// <summary>
         /// Query the PCM's Broad Cast Code.
         /// </summary>
-        public async Task<Response<string>> QueryBCC()
+        public async Task<string> QueryBCC()
         {
             await this.device.SetTimeout(TimeoutScenario.ReadProperty);
 
@@ -124,7 +106,7 @@ namespace PcmHacking
         /// <summary>
         /// Query the PCM's Manufacturer Enable Counter (MEC)
         /// </summary>
-        public async Task<Response<string>> QueryMEC()
+        public async Task<string> QueryMEC()
         {
             await this.device.SetTimeout(TimeoutScenario.ReadProperty);
 
@@ -139,7 +121,7 @@ namespace PcmHacking
         /// <summary>
         /// Query the PCM's voltage PID.
         /// </summary>
-        public async Task<Response<string>> QueryVoltage()
+        public async Task<string> QueryVoltage()
         {
             await this.device.SetTimeout(TimeoutScenario.ReadProperty);
 
@@ -148,9 +130,10 @@ namespace PcmHacking
                 this.protocol.ParsePidResponse,
                 CancellationToken.None);
 
-            Response<int> intResponse = await query.Execute();
-            double voltage = intResponse.Value / 10.0;
-            return new Response<string>(intResponse.Status, voltage.ToString());
+            int intResponse = await query.Execute();
+            double voltage = intResponse / 10.0;
+
+            return voltage.ToString();
         }
 
         /// <summary>
@@ -159,14 +142,13 @@ namespace PcmHacking
         /// <remarks>
         /// Requires that the PCM is already unlocked
         /// </remarks>
-        public async Task<Response<bool>> UpdateVin(string vin)
+        public async Task UpdateVin(string vin)
         {
             this.device.ClearMessageQueue();
 
             if (vin.Length != 17) // should never happen, but....
             {
-                this.logger.AddUserMessage("VIN " + vin + " is not 17 characters long!");
-                return Response.Create(ResponseStatus.Error, false);
+                throw new ObdException($"VIN {vin} is not 17 characters long!", ObdExceptionReason.Error);
             }
 
             this.logger.AddUserMessage("Changing VIN to " + vin);
@@ -177,23 +159,20 @@ namespace PcmHacking
             byte[] vin3 = new byte[6] { bvin[11], bvin[12], bvin[13], bvin[14], bvin[15], bvin[16] };
 
             this.logger.AddUserMessage("Block 1");
-            Response<bool> block1 = await WriteBlock(BlockId.Vin1, vin1);
-            if (block1.Status != ResponseStatus.Success) return Response.Create(ResponseStatus.Error, false);
-            this.logger.AddUserMessage("Block 2");
-            Response<bool> block2 = await WriteBlock(BlockId.Vin2, vin2);
-            if (block2.Status != ResponseStatus.Success) return Response.Create(ResponseStatus.Error, false);
-            this.logger.AddUserMessage("Block 3");
-            Response<bool> block3 = await WriteBlock(BlockId.Vin3, vin3);
-            if (block3.Status != ResponseStatus.Success) return Response.Create(ResponseStatus.Error, false);
+            await WriteBlock(BlockId.Vin1, vin1);
 
-            return Response.Create(ResponseStatus.Success, true);
+            this.logger.AddUserMessage("Block 2");
+            await WriteBlock(BlockId.Vin2, vin2);
+
+            this.logger.AddUserMessage("Block 3");
+            await WriteBlock(BlockId.Vin3, vin3);
         }
 
         /// <summary>
         /// Query the PCM's operating system ID.
         /// </summary>
         /// <returns></returns>
-        public async Task<Response<UInt32>> QueryOperatingSystemId(CancellationToken cancellationToken)
+        public async Task<UInt32> QueryOperatingSystemId(CancellationToken cancellationToken)
         {
             await this.device.SetTimeout(TimeoutScenario.ReadProperty);
             return await this.QueryUnsignedValue(this.protocol.CreateOperatingSystemIdReadRequest, cancellationToken);
@@ -205,7 +184,7 @@ namespace PcmHacking
         /// <remarks>
         /// Note that this is a software variable and my not match the hardware at all of the software runs.
         /// </remarks>
-        public async Task<Response<UInt32>> QueryHardwareId()
+        public async Task<UInt32> QueryHardwareId()
         {
             return await this.QueryUnsignedValue(this.protocol.CreateHardwareIdReadRequest, CancellationToken.None);
         }
@@ -213,7 +192,7 @@ namespace PcmHacking
         /// <summary>
         /// Query the PCM's calibration ID.
         /// </summary>
-        public async Task<Response<UInt32>> QueryCalibrationId()
+        public async Task<UInt32> QueryCalibrationId()
         {
             await this.device.SetTimeout(TimeoutScenario.ReadProperty);
 
@@ -227,7 +206,7 @@ namespace PcmHacking
         /// <summary>
         /// Helper function for queries that return unsigned 32-bit integers.
         /// </summary>
-        private async Task<Response<UInt32>> QueryUnsignedValue(Func<Message> generator, CancellationToken cancellationToken)
+        private async Task<UInt32> QueryUnsignedValue(Func<Message> generator, CancellationToken cancellationToken)
         {
             await this.device.SetTimeout(TimeoutScenario.ReadProperty);
 

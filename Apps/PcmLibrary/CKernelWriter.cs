@@ -65,11 +65,7 @@ namespace PcmHacking
                     if (this.vehicle.Enable4xReadWrite)
                     {
                         // if the vehicle bus switches but the device does not, the bus will need to time out to revert back to 1x, and the next steps will fail.
-                        if (!await this.vehicle.VehicleSetVPW4x(VpwSpeed.FourX))
-                        {
-                            this.logger.AddUserMessage("Stopping here because we were unable to switch to 4X.");
-                            return false;
-                        }
+                        await this.vehicle.VehicleSetVPW4x();
                     }
                     else
                     {
@@ -140,18 +136,16 @@ namespace PcmHacking
                 // Confirm operating system match
                 await this.vehicle.SendToolPresentNotification();
                 await this.vehicle.SetDeviceTimeout(TimeoutScenario.ReadProperty);
-                Response<UInt32> osidResponse = await this.vehicle.QueryOperatingSystemIdFromKernel(cancellationToken);
-                if (needToCheckOperatingSystem && (osidResponse.Status != ResponseStatus.Success))
-                {
-                    // The kernel seems broken. This shouldn't happen, but if it does, halt.
-                    this.logger.AddUserMessage("The kernel did not respond to operating system ID query.");
-                    return false;
-                }
 
-                Utility.ReportOperatingSystems(validator.GetOsidFromImage(), osidResponse.Value, this.writeType, this.logger, out bool shouldHalt);
-                if (needToCheckOperatingSystem && shouldHalt)
+                if (needToCheckOperatingSystem)
                 {
-                    return false;
+                    UInt32 osidResponse = await this.vehicle.QueryOperatingSystemIdFromKernel(cancellationToken);
+                    Utility.ReportOperatingSystems(validator.GetOsidFromImage(), osidResponse, this.writeType, this.logger, out bool shouldHalt);
+
+                    if (shouldHalt)
+                    {
+                        return false;
+                    }
                 }
 
                 success = await this.Write(cancellationToken, image);
@@ -271,8 +265,10 @@ namespace PcmHacking
                 this.logger);
 
             bool allRangesMatch = false;
-            int messageRetryCount = 0;
+            int totalRetryCount = 0;
+
             await this.vehicle.SendToolPresentNotification();
+
             for (int attempt = 1; attempt <= 5; attempt++)
             {
                 logger.StatusUpdateReset();
@@ -297,7 +293,7 @@ namespace PcmHacking
                         this.logger.AddUserMessage("All relevant ranges are identical.");
                         if (attempt > 1)
                         {
-                            Utility.ReportRetryCount("Write", messageRetryCount, pcmInfo.ImageSize, this.logger);
+                            Utility.ReportRetryCount("Write", totalRetryCount, pcmInfo.ImageSize, this.logger);
                         }
                         break;
                     }
@@ -307,7 +303,7 @@ namespace PcmHacking
                 if ((this.writeType == WriteType.TestWrite) && (attempt > 1))
                 {
                     logger.AddUserMessage("Test write complete.");
-                    Utility.ReportRetryCount("Write", messageRetryCount, pcmInfo.ImageSize, this.logger);
+                    Utility.ReportRetryCount("Write", totalRetryCount, pcmInfo.ImageSize, this.logger);
                     return true;
                 }
 
@@ -358,7 +354,7 @@ namespace PcmHacking
                         this.logger.AddUserMessage("Writing...");
                     }
 
-                    Response<bool> writeResponse = await WriteMemoryRange(
+                    var thisBlockRetryCount = await WriteMemoryRange(
                         range,
                         image,
                         this.writeType == WriteType.TestWrite,
@@ -367,18 +363,15 @@ namespace PcmHacking
                         bytesRemaining,
                         cancellationToken);
 
-                    if (writeResponse.RetryCount > 0)
+                    if (thisBlockRetryCount > 0)
                     {
-                        this.logger.AddUserMessage("Retry count for this block: " + writeResponse.RetryCount);
-                        messageRetryCount += writeResponse.RetryCount;
+                        this.logger.AddUserMessage($"Retry count for this block: {thisBlockRetryCount}");
+                        totalRetryCount += thisBlockRetryCount;
                     }
 
-                    logger.StatusUpdateRetryCount((messageRetryCount > 0) ? messageRetryCount.ToString() + ((messageRetryCount > 1) ? " Retries" : " Retry") : string.Empty);
+                    logger.StatusUpdateRetryCount((totalRetryCount > 0) ? totalRetryCount.ToString() + ((totalRetryCount > 1) ? " Retries" : " Retry") : string.Empty);
 
-                    if (writeResponse.Value)
-                    {
-                        bytesRemaining -= range.Size;
-                    }
+                    bytesRemaining -= range.Size;
                 }
             }
 
@@ -483,18 +476,11 @@ namespace PcmHacking
                  cancellationToken);
 
             eraseRequest.MaxTimeouts = 3;
-            Response<byte> eraseResponse = await eraseRequest.Execute();
+            byte eraseResponse = await eraseRequest.Execute();
 
-            if (eraseResponse.Status != ResponseStatus.Success)
+            if (eraseResponse != 0x00)
             {
-                this.logger.AddUserMessage("Unable to erase flash memory: " + eraseResponse.Status.ToString());
-                this.RequestDebugLogs(cancellationToken);
-                return false;
-            }
-
-            if (eraseResponse.Value != 0x00)
-            {
-                this.logger.AddUserMessage("Unable to erase flash memory. Code: " + eraseResponse.Value.ToString("X2"));
+                this.logger.AddUserMessage("Unable to erase flash memory. Code: " + eraseResponse.ToString("X2"));
                 this.RequestDebugLogs(cancellationToken);
                 return false;
             }
@@ -505,7 +491,7 @@ namespace PcmHacking
         /// <summary>
         /// Copy a single memory range to the PCM.
         /// </summary>
-        private async Task<Response<bool>> WriteMemoryRange(
+        private async Task<int> WriteMemoryRange(
             MemoryRange range,
             byte[] image,
             bool justTestWrite,
@@ -516,12 +502,10 @@ namespace PcmHacking
         {
             int retryCount = 0;
             int devicePayloadSize = vehicle.DeviceMaxFlashWriteSendSize - 12; // Headers use 10 bytes, sum uses 2 bytes.
+
             for (int index = 0; index < range.Size; index += devicePayloadSize)
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    return Response.Create(ResponseStatus.Cancelled, false, retryCount);
-                }
+                cancellationToken.ThrowIfCancellationRequested();
 
                 await this.vehicle.SendToolPresentNotification();
 
@@ -566,17 +550,13 @@ namespace PcmHacking
                 await this.vehicle.SetDeviceTimeout(TimeoutScenario.WriteMemoryBlock);
 
                 // WritePayload contains a retry loop, so if it fails, we don't need to retry at this layer.
-                Response<bool> response = await this.vehicle.WritePayload(payloadMessage, cancellationToken);
-                if (response.Status != ResponseStatus.Success)
-                {
-                    return Response.Create(ResponseStatus.Error, false, response.RetryCount);
-                }
+                var writeRetryCount = await this.vehicle.WritePayload(this.pcmInfo, payloadMessage, cancellationToken);
 
                 bytesRemaining -= thisPayloadSize;
-                retryCount += response.RetryCount;
+                retryCount += writeRetryCount;
             }
 
-            return Response.Create(ResponseStatus.Success, true, retryCount);
+            return retryCount;
         }
 
         /// <summary>

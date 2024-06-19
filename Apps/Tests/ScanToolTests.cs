@@ -30,10 +30,7 @@ namespace Tests
 
             // Send a message.
             Message message = new Message(new byte[] { 0x6c, 0x10, 0xF0, 0x3C, 0x01 });
-            bool sendSuccess = await device.SendMessage(message);
-
-            // Confirm success.
-            Assert.IsTrue(sendSuccess, "Send success.");
+            await device.SendMessage(message);
 
             // Confirm that the device sent the bytes we expect it to send.
             Assert.AreEqual("STPX H:6C10F0, R:1, D:3C01 \r", System.Text.Encoding.ASCII.GetString(port.MessagesSent[0]), "Set-header command");

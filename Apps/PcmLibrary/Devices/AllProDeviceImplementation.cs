@@ -220,7 +220,7 @@ namespace PcmHacking
         /// <summary>
         /// Send a message, do not expect a response.
         /// </summary>
-        public override async Task<bool> SendMessage(Message message)
+        public override async Task SendMessage(Message message)
         {
             byte[] messageBytes = message.GetBytes();
             string header;
@@ -239,10 +239,7 @@ namespace PcmHacking
                     this.Logger.AddDebugMessage("Set header response: " + setHeaderResponse);
                 }
 
-                if (!this.ProcessResponse(setHeaderResponse, "set-header command"))
-                {
-                    return false;
-                }
+                this.ProcessResponse(setHeaderResponse, "set-header command");
 
                 this.currentHeader = header;
             }
@@ -250,12 +247,7 @@ namespace PcmHacking
             payload = payload.Replace(" ", "");
 
             string sendMessageResponse = await this.SendRequest(payload + " ");
-            if (!this.ProcessResponse(sendMessageResponse, "message content"))
-            {
-                return false;
-            }
-
-            return true;
+            this.ProcessResponse(sendMessageResponse, "message content");
         }
 
         /// <summary>

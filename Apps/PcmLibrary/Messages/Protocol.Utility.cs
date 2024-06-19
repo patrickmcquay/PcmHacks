@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace PcmHacking
@@ -9,55 +10,51 @@ namespace PcmHacking
         /// <summary>
         /// Parse a one-byte payload
         /// </summary>
-        internal Response<byte> ParseByte(Message responseMessage, byte mode, byte submode)
+        internal byte ParseByte(Message responseMessage, byte mode, byte submode)
         {
-            ResponseStatus status;
             byte[] expected = { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, (byte)(mode | Mode.Response), submode };
-            if (!TryVerifyInitialBytes(responseMessage, expected, out status))
+            if (!VerifyInitialBytes(responseMessage, expected))
             {
                 byte[] refused = { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.NegativeResponse, mode, submode };
-                if (TryVerifyInitialBytes(responseMessage, refused, out status))
+                if (VerifyInitialBytes(responseMessage, refused))
                 {
-                    return Response.Create(ResponseStatus.Refused, (byte)0);
+                    throw new ObdException("PCM Refused", ObdExceptionReason.Refused);
                 }
 
-                return Response.Create(status, (byte)0);
+                throw new ObdException($"ParseByte verification failure: expected {expected} got {responseMessage.GetBytes()}", ObdExceptionReason.Error);
             }
 
             byte[] responseBytes = responseMessage.GetBytes();
             if (responseBytes.Length < 6)
             {
-                return Response.Create(ResponseStatus.Truncated, (byte)0);
+                throw new ObdException($"Response truncated, got {responseBytes}", ObdExceptionReason.Truncated);
             }
 
-            int value = responseBytes[5];
-
-            return Response.Create(ResponseStatus.Success, (byte)value);
+            return responseBytes[5];
         }
 
         /// <summary>
         /// Turn four bytes of payload into a UInt32.
         /// </summary>
-        internal Response<UInt32> ParseUInt32(Message responseMessage, byte mode, byte submode)
+        internal UInt32 ParseUInt32WithSubMode(Message responseMessage, byte mode, byte submode)
         {
-            ResponseStatus status;
+            byte[] responseBytes = responseMessage.GetBytes();
+
             byte[] expected = { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, (byte)(mode | Mode.Response), submode };
-            if (!TryVerifyInitialBytes(responseMessage, expected, out status))
+            if (!VerifyInitialBytes(responseBytes, expected))
             {
                 byte[] refused = { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.NegativeResponse, mode, submode };
-                if (TryVerifyInitialBytes(responseMessage, refused, out status))
+                if (VerifyInitialBytes(responseBytes, refused))
                 {
-                    return Response.Create(ResponseStatus.Refused, (UInt32)0);
+                    throw new ObdException("PCM Refused", ObdExceptionReason.Refused);
                 }
 
-                return Response.Create(status, (UInt32)0);
+                throw new ObdException($"ParseUInt32WithSubMode verification failure: expected {expected} got {responseBytes}", ObdExceptionReason.Error);
             }
-
-            byte[] responseBytes = responseMessage.GetBytes();
 
             if (responseBytes.Length < 9)
             {
-                return Response.Create(ResponseStatus.Truncated, (UInt32)0);
+                throw new ObdException($"Response truncated, got {responseBytes}", ObdExceptionReason.Truncated);
             }
 
             int value =
@@ -66,7 +63,34 @@ namespace PcmHacking
                 (responseBytes[7] << 8) |
                 responseBytes[8];
 
-            return Response.Create(ResponseStatus.Success, (UInt32)value);
+            return (UInt32)value;
+        }
+
+        /// <summary>
+        /// Parse a 32-bit value from the first four bytes of a message payload.
+        /// </summary>
+        public UInt32 ParseUInt32WithoutSubMode(Message message, byte responseMode)
+        {
+            byte[] responseBytes = message.GetBytes();
+            byte[] expected = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, responseMode };
+
+            if (!VerifyInitialBytes(responseBytes, expected))
+            {
+                throw new ObdException($"ParseUInt32WithoutSubMode verification failure: expected {expected} got {responseBytes}", ObdExceptionReason.Error);
+            }
+
+            if (responseBytes.Length < 9)
+            {
+                throw new ObdException($"Response truncated, got {responseBytes}", ObdExceptionReason.Truncated);
+            }
+
+            int value =
+                (responseBytes[5] << 24) |
+                (responseBytes[6] << 16) |
+                (responseBytes[7] << 8) |
+                responseBytes[8];
+
+            return (UInt32)value;
         }
 
         /// <summary>
@@ -75,13 +99,18 @@ namespace PcmHacking
         /// <remarks>
         /// TODO: Make this private, use public methods that are tied to a specific message type.
         /// </remarks>
-        public Response<bool> DoSimpleValidation(Message message, byte priority, byte mode, params byte[] data)
+        public bool IsMessageValid(Message message, byte priority, byte mode, params byte[] data)
         {
             byte[] actual = message.GetBytes();
-            ResponseStatus status;
+
+            byte[] failure = new byte[] { priority, DeviceId.Tool, DeviceId.Pcm, Mode.NegativeResponse, mode };
+            if (VerifyInitialBytes(actual, failure))
+            {
+                return false;
+            }
 
             byte[] success = new byte[] { priority, DeviceId.Tool, DeviceId.Pcm, (byte)(mode + Mode.Response), };
-            if (this.TryVerifyInitialBytes(actual, success, out status))
+            if (VerifyInitialBytes(actual, success))
             {
                 if (data != null && data.Length > 0)
                 {
@@ -90,68 +119,39 @@ namespace PcmHacking
                         const int headBytes = 4;
                         int actualLength = actual.Length;
                         int expectedLength = data.Length + headBytes;
-                        if (actualLength >= expectedLength)
+
+                        if (actualLength < expectedLength)
                         {
-                            if (actual[headBytes + index] == data[index])
-                            {
-                                continue;
-                            }
-                            else
-                            {
-                                return Response.Create(ResponseStatus.UnexpectedResponse, false);
-                            }
+                            return false;
                         }
-                        else
+
+                        if (actual[headBytes + index] != data[index])
                         {
-                            return Response.Create(ResponseStatus.Truncated, false);
+                            return false;
                         }
                     }
                 }
 
-                return Response.Create(ResponseStatus.Success, true);
+                return true;
             }
 
-            byte[] failure = new byte[] { priority, DeviceId.Tool, DeviceId.Pcm, Mode.NegativeResponse, mode };
-            if (this.TryVerifyInitialBytes(actual, failure, out status))
-            {
-                return Response.Create(ResponseStatus.Refused, false);
-            }
-
-            return Response.Create(ResponseStatus.UnexpectedResponse, false);
+            throw new ObdException($"Unexpected response, the response neither succeeded, nor failed. Content: {actual}", ObdExceptionReason.UnexpectedResponse);
         }
 
         /// <summary>
         /// Confirm that the first portion of the 'actual' array of bytes matches the 'expected' array of bytes.
         /// </summary>
-        private bool TryVerifyInitialBytes(Message actual, byte[] expected, out ResponseStatus status)
+        private bool VerifyInitialBytes(Message actual, byte[] expected)
         {
-            return TryVerifyInitialBytes(actual.GetBytes(), expected, out status);
+            return VerifyInitialBytes(actual.GetBytes(), expected);
         }
 
         /// <summary>
         /// Confirm that the first portion of the 'actual' array of bytes matches the 'expected' array of bytes.
         /// </summary>
-        private bool TryVerifyInitialBytes(byte[] actual, byte[] expected, out ResponseStatus status)
+        private bool VerifyInitialBytes(byte[] actual, byte[] expected)
         {
-            if (actual.Length < expected.Length)
-            {
-                // This is how we indicate that the response is too short.
-                status = ResponseStatus.Truncated;
-                return false;
-            }
-
-            for (int index = 0; index < expected.Length; index++)
-            {
-                if (actual[index] != expected[index])
-                {
-                    // This is how we indicate that the response contained garbage.
-                    status = ResponseStatus.UnexpectedResponse;
-                    return false;
-                }
-            }
-
-            status = ResponseStatus.Success;
-            return true;
+            return actual.SequenceEqual(expected);
         }
     }
 }

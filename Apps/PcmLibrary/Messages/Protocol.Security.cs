@@ -29,29 +29,25 @@ namespace PcmHacking
         /// <summary>
         /// Parse the response to a seed request.
         /// </summary>
-        public Response<UInt16> ParseSeed(byte[] response)
+        public UInt16 ParseSeed(byte[] response)
         {
-            ResponseStatus status;
-            UInt16 result = 0;
-
             byte[] unlocked = { Priority.Physical0, 0x70, DeviceId.Pcm, Mode.Seed + Mode.Response, 0x01, 0x37 };
             byte[] seed = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.Seed + Mode.Response, 0x01 };
 
-            if (TryVerifyInitialBytes(response, unlocked, out status))
+            //check if the seed doesnt match
+            if (!VerifyInitialBytes(response, seed))
             {
-                status = ResponseStatus.Success;
-                return Response.Create(ResponseStatus.Success, result);
+                throw new ObdException($"Seed verification failed, expected {seed}, got {response}", ObdExceptionReason.Error);
             }
 
-            if (!TryVerifyInitialBytes(response, seed, out status))
+            //check if the PCM is already unlocked
+            if (VerifyInitialBytes(response, unlocked))
             {
-                return Response.Create(ResponseStatus.Error, result);
+                return 0;
             }
 
             // Let's not reverse endianess
-            result = (UInt16)((response[5] << 8) | response[6]);
-
-            return Response.Create(ResponseStatus.Success, result);
+            return (UInt16)((response[5] << 8) | response[6]);
         }
 
         /// <summary>
@@ -68,12 +64,11 @@ namespace PcmHacking
         /// <summary>
         /// Determine whether we were able to unlock the PCM.
         /// </summary>
-        public Response<bool> ParseUnlockResponse(byte[] unlockResponse, out string errorMessage)
+        public string ParseUnlockResponse(byte[] unlockResponse)
         {
             if (unlockResponse.Length < 6)
             {
-                errorMessage = $"Unlock response truncated, expected 6 bytes, got {unlockResponse.Length} bytes.";
-                return Response.Create(ResponseStatus.UnexpectedResponse, false);
+                return $"Unlock response truncated, expected 6 bytes, got {unlockResponse.Length} bytes.";
             }
 
             byte unlockCode = unlockResponse[5];
@@ -81,28 +76,22 @@ namespace PcmHacking
             switch (unlockCode)
             {
                 case Security.Allowed:
-                    errorMessage = null;
-                    return Response.Create(ResponseStatus.Success, true);
+                    return null;
 
                 case Security.Denied:
-                    errorMessage = $"The PCM refused to unlock";
-                    return Response.Create(ResponseStatus.Error, false);
+                    return $"The PCM refused to unlock";
 
                 case Security.Invalid:
-                    errorMessage = $"The PCM didn't accept the unlock key value";
-                    return Response.Create(ResponseStatus.Error, false);
-
+                    return  $"The PCM didn't accept the unlock key value";
+                    
                 case Security.TooMany:
-                    errorMessage = $"The PCM did not accept the key - too many attempts";
-                    return Response.Create(ResponseStatus.Error, false);
-
+                    return $"The PCM did not accept the key - too many attempts";
+                    
                 case Security.Delay:
-                    errorMessage = $"The PCM is enforcing timeout lock";
-                    return Response.Create(ResponseStatus.Timeout, false);
+                    return $"The PCM is enforcing timeout lock";
                     
                 default:
-                    errorMessage = $"Unknown unlock response code: 0x{unlockCode:X2}";
-                    return Response.Create(ResponseStatus.UnexpectedResponse, false);
+                    return $"Unknown unlock response code: 0x{unlockCode:X2}";
             }
         }
 
@@ -111,10 +100,8 @@ namespace PcmHacking
         /// </summary>
         public bool IsUnlocked(byte[] response)
         {
-            ResponseStatus status;
             byte[] unlocked = { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.Seed + Mode.Response, 0x01, 0x37 };
-
-            if (TryVerifyInitialBytes(response, unlocked, out status))
+            if (VerifyInitialBytes(response, unlocked))
             {
                 // To short to be a seed?
                 if (response.Length < 7)

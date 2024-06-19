@@ -50,11 +50,9 @@ namespace PcmHacking
             return DeviceType;
         }
 
-        public override async Task<bool> Initialize()
+        public override async Task Initialize()
         {
             this.Logger.AddDebugMessage("Initializing " + this.ToString());
-
-            Response<Message> m;
 
             SerialPortConfiguration configuration = new SerialPortConfiguration();
             configuration.BaudRate = 57600; // default RS232 speed for 838, 842. ignored by the USB 852.
@@ -63,76 +61,63 @@ namespace PcmHacking
 
             this.Logger.AddDebugMessage("Sending 'reset' message.");
             await this.Port.Send(AvtDevice.AVT_RESET.GetBytes());
-            m = await ReadAVTPacket();
-            if (m.Status == ResponseStatus.Success)
+
+            var packet = await ReadAVTPacket();
+
+            switch (packet.GetBytes()[0])
             {
-                switch (m.Value.GetBytes()[0])
-                {
-                    case 0x27:
-                        this.Logger.AddUserMessage("AVT 852 Reset OK");
-                        this.Model = 852;
-                        break;
-                    case 0x12:
-                        this.Logger.AddUserMessage("AVT 842 Reset OK");
-                        this.Model = 842;
-                        break;
-                    case 0x07:
-                        this.Logger.AddUserMessage("AVT 838 Reset OK");
-                        this.Model = 838;
-                        this.MaxSendSize = 2048 + 10 + 2;
-                        this.MaxReceiveSize = 2048 + 10 + 2;
-                        break;
-                    default:
-                        this.Logger.AddUserMessage("Unknown and unsupported AVT device detected. Please add support and submit a patch!");
-                        return false;
-                }
-            }
-            else
-            {
-                this.Logger.AddUserMessage("AVT device not found or failed reset");
-                return false;
+                case 0x27:
+                    this.Logger.AddUserMessage("AVT 852 Reset OK");
+                    this.Model = 852;
+                    break;
+                case 0x12:
+                    this.Logger.AddUserMessage("AVT 842 Reset OK");
+                    this.Model = 842;
+                    break;
+                case 0x07:
+                    this.Logger.AddUserMessage("AVT 838 Reset OK");
+                    this.Model = 838;
+                    this.MaxSendSize = 2048 + 10 + 2;
+                    this.MaxReceiveSize = 2048 + 10 + 2;
+                    break;
+                default:
+                    throw new ObdException("Unknown and unsupported AVT device detected. Please add support and submit a patch!", ObdExceptionReason.UnexpectedResponse);
             }
 
             this.Logger.AddDebugMessage("Looking for Firmware message");
+
             if (this.Model == 838)
             {
                 await this.Port.Send(AvtDevice.AVT_REQUEST_FIRMWARE.GetBytes()); // we need to request this on 838 but the 852 sends it without being asked. 842 needs testing.
             }
 
-            m = await this.FindResponse(AVT_FIRMWARE);
-            if ( m.Status == ResponseStatus.Success )
-            {
-                byte firmware = m.Value.GetBytes()[1];
-                int major = firmware >> 4;
-                int minor = firmware & 0x0F;
-                this.Logger.AddUserMessage("AVT Firmware " + major + "." + minor);
-            }
-            else
-            {
-                this.Logger.AddUserMessage("Firmware not found or failed reset");
-                this.Logger.AddDebugMessage("Expected " + AVT_FIRMWARE.GetBytes());
-                return false;
-            }
+            var response = await this.FindResponse(AVT_FIRMWARE);
+
+            byte firmware = response.GetBytes()[1];
+
+            int major = firmware >> 4;
+            int minor = firmware & 0x0F;
+                
+            this.Logger.AddUserMessage("AVT Firmware " + major + "." + minor);
 
             // 838 defaults to vpw mode, so dont set it on that device.
             if (this.Model != 838) {
+                
                 await this.Port.Send(AvtDevice.AVT_ENTER_VPW_MODE.GetBytes());
-                m = await FindResponse(AVT_VPW);
-                if (m.Status == ResponseStatus.Success)
-                {
-                    this.Logger.AddDebugMessage("Set VPW Mode");
-                }
-                else
-                {
-                    this.Logger.AddUserMessage("Unable to set AVT device to VPW mode");
-                    this.Logger.AddDebugMessage("Expected " + AvtDevice.AVT_VPW.ToString());
-                    return false;
-                }
+                
+                var m = await this.FindResponse(AVT_VPW);
+
+                this.Logger.AddDebugMessage("Set VPW Mode");
             }
+            else
+            {
+                this.Logger.AddUserMessage("Unable to set AVT device to VPW mode");
+                this.Logger.AddDebugMessage("Expected " + AvtDevice.AVT_VPW.ToString());
 
+                return;
+            }
+         
             await AVTSetup();
-
-            return true;
         }
 
         /// <summary>
@@ -144,61 +129,55 @@ namespace PcmHacking
         }
 
         /// <summary>
-        /// This will process incoming messages for up to 500ms looking for a message
+        /// This will process incoming messages for up to 3 seconds looking for a message
         /// </summary>
-        public async Task<Response<Message>> FindResponse(Message expected)
+        public async Task<Message> FindResponse(Message expected)
         {
-            //this.Logger.AddDebugMessage("FindResponse called");
-
             Stopwatch stopwatch = new Stopwatch();
+
             stopwatch.Start();
 
             while(stopwatch.ElapsedMilliseconds < 3000)
             {
-                Response<Message> response = await this.ReadAVTPacket();
-                if (response.Status == ResponseStatus.Success) 
-                    if (Utility.CompareArraysPart(response.Value.GetBytes(), expected.GetBytes()))
-                        return Response.Create(ResponseStatus.Success, (Message) response.Value);
+                var response = await this.ReadAVTPacket();
+                
+                if (Utility.CompareArraysPart(response.GetBytes(), expected.GetBytes()))
+                {
+                    return response;
+                }
+
                 await Task.Delay(100);
             }
 
-            return Response.Create(ResponseStatus.Timeout, (Message) null);
+            throw new ObdException($"Timed out waiting for a response. Expected {expected}.", ObdExceptionReason.Timeout);
         }
 
         /// <summary>
         /// Read an AVT formatted packet from the interface, and return a Response/Message
         /// </summary>
-        async private Task<Response<Message>> ReadAVTPacket()
+        async private Task<Message> ReadAVTPacket()
         {
-
-            //this.Logger.AddDebugMessage("Trace: ReadAVTPacket");
             int length = 0;
             bool status = true; // do we have a status byte? (we dont for some 9x init commands)
             byte[] rx = new byte[2]; // we dont read more than 2 bytes at a time
 
             // Get the first packet byte.
-            try
+            Stopwatch sw = new Stopwatch();
+            
+            sw.Start();
+
+            while (sw.ElapsedMilliseconds < 1000)
             {
-                Stopwatch sw = new Stopwatch();
-                sw.Start();
-                while (sw.ElapsedMilliseconds < 1000)
-                {
-                    if (await this.Port.GetReceiveQueueSize() > 0) { break;}
-                }
-                if (await this.Port.GetReceiveQueueSize() > 0)
-                {
-                    await this.Port.Receive(rx, 0, 1);
-                }
-                else
-                {
-                    this.Logger.AddDebugMessage("Waited 2seconds.. no data present");
-                    return Response.Create(ResponseStatus.Timeout, (Message)null);
-                }
+                if (await this.Port.GetReceiveQueueSize() > 0) { break; }
             }
-            catch (Exception) // timeout exception - log no data, return error.
+
+            if (await this.Port.GetReceiveQueueSize() > 0)
             {
-                this.Logger.AddDebugMessage("No Data");
-                return Response.Create(ResponseStatus.Timeout, (Message)null);
+                await this.Port.Receive(rx, 0, 1);
+            }
+            else
+            {
+                throw new ObdException("Timeout waiting for AVT Packet", ObdExceptionReason.Timeout);
             }
 
             // read an AVT format length
@@ -229,9 +208,10 @@ namespace PcmHacking
                         case 0x3: // Invalid Command
                             length = rx[0] & 0x0F;
                             byte[] r = new byte[length];
+
                             await this.Port.Receive(r, 0, 1);
-                            this.Logger.AddDebugMessage("RX: Invalid command. Packet that began with  " + r.ToHex() + " was rejected by the AVT");
-                            return Response.Create(ResponseStatus.Error, new Message(r));
+
+                            throw new ObdException($"RX: Invalid command. Packet that began with {r.ToHex()} was rejected by the AVT", ObdExceptionReason.UnexpectedResponse);
                         case 0x6: // avt filter
                             length = rx[0] & 0x0F;
                             status = false;
@@ -250,24 +230,26 @@ namespace PcmHacking
                             status = false;
                             break;
                         default:
-                            this.Logger.AddDebugMessage("RX: Unhandled packet type " + type + ". Add support to ReadAVTPacket()");
-                            status = false; // all non-zero high nibble type bytes have no status
-                            break;
+                            throw new ObdException($"RX: Unhandled packet type {type}. Add support to ReadAVTPacket()", ObdExceptionReason.UnexpectedResponse);
                     }
                     break;
             }
 
             // if we need to get check and discard the status byte
-            if (status == true)
+            if (status)
             {
                 length--;
+
                 await this.Port.Receive(rx, 0, 1);
-                if (rx[0] != 0) this.Logger.AddDebugMessage("RX: bad packet status: " + rx[0].ToString("X2"));
+                
+                if (rx[0] != 0)
+                {
+                    this.Logger.AddDebugMessage("RX: bad packet status: " + rx[0].ToString("X2"));
+                }
             }
 
             if (length <= 0) {
-                this.Logger.AddDebugMessage("Not reading " + length + " byte packet");
-                return Response.Create(ResponseStatus.Error, (Message)null);
+                throw new ObdException($"Not reading {length} byte packet", ObdExceptionReason.Truncated);
             }
 
             // build a complete packet
@@ -276,25 +258,27 @@ namespace PcmHacking
             int bytes;
             DateTime start = DateTime.Now;
             DateTime stop = start + TimeSpan.FromSeconds(2);
+
             for (int i = 0; i < length; )
             {
-                if (DateTime.Now > stop) return Response.Create(ResponseStatus.Timeout, (Message)null);
+                if (DateTime.Now > stop)
+                {
+                    throw new ObdException("Timed out waiting for packet.", ObdExceptionReason.Timeout);
+                }
+
                 bytes = await this.Port.Receive(receive, 0, length);
                 Buffer.BlockCopy(receive, 0, packet, i, bytes);
                 i += bytes;
             }
             
-            //this.Logger.AddDebugMessage("Total Length=" + length + " RX: " + packet.ToHex());
-            return Response.Create(ResponseStatus.Success, new Message(packet));
+            return new Message(packet);
         }
 
         /// <summary>
         /// Convert a Message to an AVT formatted transmit, and send to the interface
         /// </summary>
-        async private Task<Response<Message>> SendAVTPacket(Message message)
+        async private Task SendAVTPacket(Message message)
         {
-            //this.Logger.AddDebugMessage("Trace: SendAVTPacket");
-
             byte[] txb = { 0x12 };
             int length = message.GetBytes().Length;
 
@@ -319,73 +303,47 @@ namespace PcmHacking
                 await this.Port.Send(txb);
             }
 
-            //this.Logger.AddDebugMessage("send: " + message.GetBytes().ToHex());
             await this.Port.Send(message.GetBytes());
-            
-            return Response.Create(ResponseStatus.Success, message);
         }
 
         /// <summary>
         /// Configure AVT to return only packets targeted to the tool (Device ID F0), and disable transmit acks
         /// </summary>
-        async private Task<Response<Boolean>> AVTSetup()
+        async private Task AVTSetup()
         {
-            //this.Logger.AddDebugMessage("AVTSetup called");
-
             this.Logger.AddDebugMessage("Disable AVT Acks");
+
             await this.Port.Send(AVT_DISABLE_TX_ACK.GetBytes());
-            Response<Message> m = await this.FindResponse(AVT_DISABLE_TX_ACK_OK);
-            if (m.Status == ResponseStatus.Success)
-            {
-                this.Logger.AddDebugMessage("AVT Acks disabled");
-            }
-            else
-            {
-                this.Logger.AddUserMessage("Could not disable ACKs");
-                this.Logger.AddDebugMessage("Expected " + AVT_DISABLE_TX_ACK_OK.ToString());
-                return Response.Create(ResponseStatus.Error, false);
-            }
+
+            var m = await this.FindResponse(AVT_DISABLE_TX_ACK_OK);
+
+            this.Logger.AddDebugMessage("AVT Acks disabled");
 
             this.Logger.AddDebugMessage("Configure AVT filter");
-            await this.Port.Send(AVT_FILTER_DEST.GetBytes());
-            m = await this.FindResponse(AVT_FILTER_DEST_OK);
-            if (m.Status == ResponseStatus.Success)
-            {
-                this.Logger.AddDebugMessage("AVT filter configured");
-            }
-            else
-            {
-                this.Logger.AddUserMessage("Could not configure AVT filter");
-                this.Logger.AddDebugMessage("Expected " + AVT_FILTER_DEST_OK.ToString());
-                return Response.Create(ResponseStatus.Error, false);
-            }
 
-            return Response.Create(ResponseStatus.Success, true);
+            await this.Port.Send(AVT_FILTER_DEST.GetBytes());
+
+            m = await this.FindResponse(AVT_FILTER_DEST_OK);
+        
+            this.Logger.AddDebugMessage("AVT filter configured");
         }
 
         /// <summary>
         /// Send a message, wait for a response, return the response.
         /// </summary>
-        public override async Task<bool> SendMessage(Message message)
+        public override async Task SendMessage(Message message)
         {
-            //this.Logger.AddDebugMessage("Sendrequest called");
             this.Logger.AddDebugMessage("TX: " + message.GetBytes().ToHex());
+
             await SendAVTPacket(message);
-            return true;
         }
 
         protected async override Task Receive()
         {
-           
-            Response<Message> response = await ReadAVTPacket();
-            if (response.Status == ResponseStatus.Success)
-            {
-                this.Logger.AddDebugMessage("RX: " + response.Value.GetBytes().ToHex());
-                this.Enqueue(response.Value);
-                return;
-            }
+            var response = await ReadAVTPacket();
 
-            this.Logger.AddDebugMessage("AVT: no message waiting.");            
+            this.Logger.AddDebugMessage("RX: " + response.GetBytes().ToHex());
+            this.Enqueue(response);
         }
         
         /// <summary>
@@ -394,29 +352,32 @@ namespace PcmHacking
         /// <remarks>
         /// The caller must also tell the PCM to switch speeds
         /// </remarks>
-        protected override async Task<bool> SetVpwSpeedInternal(VpwSpeed newSpeed)
+        protected override async Task SetVpwSpeedInternal(VpwSpeed newSpeed)
         {
-
             if (newSpeed == VpwSpeed.Standard)
             {
                 this.Logger.AddDebugMessage("AVT setting VPW 1X");
+
                 await this.Port.Send(AvtDevice.AVT_1X_SPEED.GetBytes());
+
                 await ReadAVTPacket(); // C1 00 (switched to 1x)
             }
             else
             {
                 await ReadAVTPacket(); // 23 83 00 20 AVT generated response from generic PCM switch high speed command in Vehicle.cs
+
                 this.Logger.AddDebugMessage("AVT setting VPW 4X");
+            
                 await this.Port.Send(AvtDevice.AVT_4X_SPEED.GetBytes());
+            
                 await ReadAVTPacket(); // C1 01 (switched to 4x)
             }
-
-            return true;
         }
 
         public override void ClearMessageBuffer()
         {
             this.Port.DiscardBuffers();
+
             System.Threading.Thread.Sleep(50);
         }
     }    

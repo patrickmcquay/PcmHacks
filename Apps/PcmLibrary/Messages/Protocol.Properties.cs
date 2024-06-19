@@ -43,38 +43,11 @@ namespace PcmHacking
         }
 
         /// <summary>
-        /// Parse a 32-bit value from the first four bytes of a message payload.
-        /// </summary>
-        public Response<UInt32> ParseUInt32(Message message, byte responseMode)
-        {
-            byte[] bytes = message.GetBytes();
-            int result = 0;
-            ResponseStatus status;
-
-            byte[] expected = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, responseMode };
-            if (!TryVerifyInitialBytes(bytes, expected, out status))
-            {
-                return Response.Create(ResponseStatus.Error, (UInt32)result);
-            }
-            if (bytes.Length < 9)
-            {
-                return Response.Create(ResponseStatus.Truncated, (UInt32)result);
-            }
-
-            result = bytes[5] << 24;
-            result += bytes[6] << 16;
-            result += bytes[7] << 8;
-            result += bytes[8];
-
-            return Response.Create(ResponseStatus.Success, (UInt32)result);
-        }
-
-        /// <summary>
         /// Parse the response to a block-read request.
         /// </summary>
-        public Response<UInt32> ParseUInt32FromBlockReadResponse(Message message)
+        public UInt32 ParseUInt32FromBlockReadResponse(Message message)
         {
-            return ParseUInt32(message, Mode.ReadBlock + Mode.Response);
+            return ParseUInt32WithoutSubMode(message, Mode.ReadBlock + Mode.Response);
         }
 
         #region VIN
@@ -106,35 +79,33 @@ namespace PcmHacking
         /// <summary>
         /// Parse the responses to the three requests for VIN information.
         /// </summary>
-        public Response<string> ParseVinResponses(byte[] response1, byte[] response2, byte[] response3)
+        public string ParseVinResponses(byte[] response1, byte[] response2, byte[] response3)
         {
-            string result = "Unknown";
-            ResponseStatus status;
-
             byte[] expected = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.ReadBlock + Mode.Response, BlockId.Vin1 };
-            if (!TryVerifyInitialBytes(response1, expected, out status))
+            if (!VerifyInitialBytes(response1, expected))
             {
-                return Response.Create(status, result);
+                throw new ObdException($"Error verifying Vin Block 1. Response: {response1}", ObdExceptionReason.Error);
             }
 
             expected = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.ReadBlock + Mode.Response, BlockId.Vin2 };
-            if (!TryVerifyInitialBytes(response2, expected, out status))
+            if (!VerifyInitialBytes(response2, expected))
             {
-                return Response.Create(status, result);
+                throw new ObdException($"Error verifying Vin Block 2. Response: {response2}", ObdExceptionReason.Error);
             }
 
             expected = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.ReadBlock + Mode.Response, BlockId.Vin3 };
-            if (!TryVerifyInitialBytes(response3, expected, out status))
+            if (!VerifyInitialBytes(response3, expected))
             {
-                return Response.Create(status, result);
+                throw new ObdException($"Error verifying Vin Block 3. Response: {response3}", ObdExceptionReason.Error);
             }
 
             byte[] vinBytes = new byte[17];
+
             Buffer.BlockCopy(response1, 6, vinBytes, 0, 5);
             Buffer.BlockCopy(response2, 5, vinBytes, 5, 6);
             Buffer.BlockCopy(response3, 5, vinBytes, 11, 6);
-            string vin = System.Text.Encoding.ASCII.GetString(vinBytes);
-            return Response.Create(ResponseStatus.Success, vin);
+
+            return Encoding.ASCII.GetString(vinBytes);
         }
 
         #endregion
@@ -168,38 +139,35 @@ namespace PcmHacking
         /// <summary>
         /// Parse the responses to the three requests for Serial Number information.
         /// </summary>
-        public Response<string> ParseSerialResponses(Message response1, Message response2, Message response3)
-        {
-            string result = "Unknown";
-            ResponseStatus status;
-
+        public string ParseSerialResponses(Message response1, Message response2, Message response3)
+        { 
             byte[] expected = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.ReadBlock + Mode.Response, BlockId.Serial1 };
-            if (!TryVerifyInitialBytes(response1, expected, out status))
+            if (!VerifyInitialBytes(response1, expected))
             {
-                return Response.Create(status, result);
+                throw new ObdException($"Error verifying Serial Block 1. Response: {response1}", ObdExceptionReason.Error);
             }
 
             expected = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.ReadBlock + Mode.Response, BlockId.Serial2 };
-            if (!TryVerifyInitialBytes(response2, expected, out status))
+            if (!VerifyInitialBytes(response2, expected))
             {
-                return Response.Create(status, result);
+                throw new ObdException($"Error verifying Serial Block 2. Response: {response2}", ObdExceptionReason.Error);
             }
 
             expected = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.ReadBlock + Mode.Response, BlockId.Serial3 };
-            if (!TryVerifyInitialBytes(response3, expected, out status))
+            if (!VerifyInitialBytes(response3, expected))
             {
-                return Response.Create(status, result);
+                throw new ObdException($"Error verifying Serial Block 3. Response: {response3}", ObdExceptionReason.Error);
             }
 
             byte[] serialBytes = new byte[12];
+
             Buffer.BlockCopy(response1.GetBytes(), 5, serialBytes, 0, 4);
             Buffer.BlockCopy(response2.GetBytes(), 5, serialBytes, 4, 4);
             Buffer.BlockCopy(response3.GetBytes(), 5, serialBytes, 8, 4);
 
             byte[] printableBytes = Utility.GetPrintable(serialBytes);
-            string serial = System.Text.Encoding.ASCII.GetString(printableBytes);
 
-            return Response.Create(ResponseStatus.Success, serial);
+            return Encoding.ASCII.GetString(printableBytes);
         }
 
         #endregion
@@ -214,25 +182,22 @@ namespace PcmHacking
             return CreateReadRequest(BlockId.BCC);
         }
 
-        public Response<string> ParseBCCresponse(Message responseMessage)
+        public string ParseBCCresponse(Message responseMessage)
         {
-            string result = "Unknown";
-            ResponseStatus status;
             byte[] response = responseMessage.GetBytes();
 
             byte[] expected = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.ReadBlock + Mode.Response, BlockId.BCC };
-            if (!TryVerifyInitialBytes(response, expected, out status))
+            if (!VerifyInitialBytes(response, expected))
             {
-                return Response.Create(status, result);
+                throw new ObdException($"Error verifying BCC response. Response: {response}", ObdExceptionReason.Error);
             }
 
             byte[] BCCBytes = new byte[4];
             Buffer.BlockCopy(response, 5, BCCBytes, 0, 4);
 
             byte[] printableBytes = Utility.GetPrintable(BCCBytes);
-            string BCC = System.Text.Encoding.ASCII.GetString(printableBytes);
 
-            return Response.Create(ResponseStatus.Success, BCC);
+            return Encoding.ASCII.GetString(printableBytes);
         }
 
         #endregion
@@ -247,21 +212,17 @@ namespace PcmHacking
             return CreateReadRequest(BlockId.MEC);
         }
 
-        public Response<string> ParseMECresponse(Message responseMessage)
+        public string ParseMECresponse(Message responseMessage)
         {
-            string result = "Unknown";
-            ResponseStatus status;
             byte[] response = responseMessage.GetBytes();
 
             byte[] expected = new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, Mode.ReadBlock + Mode.Response, BlockId.MEC };
-            if (!TryVerifyInitialBytes(response, expected, out status))
+            if (!VerifyInitialBytes(response, expected))
             {
-                return Response.Create(status, result);
+                throw new ObdException($"Error verifying MEC response. Response: {response}", ObdExceptionReason.Error);
             }
 
-            string MEC = response[5].ToString();
-
-            return Response.Create(ResponseStatus.Success, MEC);
+            return response[5].ToString();
         }
 
         #endregion

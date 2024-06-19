@@ -24,10 +24,8 @@ namespace Tests
             
             // Send a message.
             Message message = new Message(new byte[] { 0x6c, 0x10, 0xF0, 0x3C, 0x01 });
-            bool sendSuccess = await device.SendMessage(message);
-
-            // Confirm success.
-            Assert.IsTrue(sendSuccess, "Send success");
+            
+            await device.SendMessage(message);
 
             // Confirm that the device sent the bytes we expect it to send.
             // The 00 00 00 stuff is just placeholders for real data.

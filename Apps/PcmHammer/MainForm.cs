@@ -1,17 +1,8 @@
 ﻿using CommandLine;
-using Microsoft.Win32;
 using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.IO;
-using System.IO.Ports;
-using System.Linq;
-using System.Net;
-using System.Net.Http;
 using System.Reflection;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -801,101 +792,50 @@ namespace PcmHacking
                 this.DisableUserInput();
 
                 var vinResponse = await this.Vehicle.QueryVin();
-                if (vinResponse.Status != ResponseStatus.Success)
-                {
-                    this.AddUserMessage("VIN query failed: " + vinResponse.Status.ToString());
-                    await this.Vehicle.ExitKernel();
-                    return;
-                }
-                this.AddUserMessage("VIN: " + vinResponse.Value);
+                
+                this.AddUserMessage("VIN: " + vinResponse);
 
                 var osResponse = await this.Vehicle.QueryOperatingSystemId(CancellationToken.None);
-                if (osResponse.Status == ResponseStatus.Success)
+
+                this.AddUserMessage("OS ID: " + osResponse.ToString());
+
+                pcmInfo = new PcmInfo(osResponse);
+                this.AddUserMessage("Hardware Type: " + pcmInfo.HardwareType.ToString());
+                if (pcmInfo.HardwareType == PcmType.P04)
                 {
-                    this.AddUserMessage("OS ID: " + osResponse.Value.ToString());
-                    pcmInfo = new PcmInfo(osResponse.Value);
-                    this.AddUserMessage("Hardware Type: " + pcmInfo.HardwareType.ToString());
-                    if (pcmInfo.HardwareType == PcmType.P04)
-                    {
-                        this.AddUserMessage("**********************************************");
-                        this.AddUserMessage("WARNING: P04 Support is still in development.");
-                        this.AddUserMessage("It may or may not read your P04 correctly.");
-                        this.AddUserMessage("There is currently no ETA for P04 Write.");
-                        this.AddUserMessage("**********************************************");
-                    }
-                }
-                else
-                {
-                    this.AddUserMessage("OS ID query failed: " + osResponse.Status.ToString());
+                    this.AddUserMessage("**********************************************");
+                    this.AddUserMessage("WARNING: P04 Support is still in development.");
+                    this.AddUserMessage("It may or may not read your P04 correctly.");
+                    this.AddUserMessage("There is currently no ETA for P04 Write.");
+                    this.AddUserMessage("**********************************************");
                 }
 
                 var calResponse = await this.Vehicle.QueryCalibrationId();
-                if (calResponse.Status == ResponseStatus.Success)
-                {
-                    this.AddUserMessage("Calibration ID: " + calResponse.Value.ToString());
-                }
-                else
-                {
-                    this.AddUserMessage("Calibration ID query failed: " + calResponse.Status.ToString());
-                }
+                this.AddUserMessage("Calibration ID: " + calResponse.ToString());
+
 
                 // Disable HardwareID lookup for the P10, P12 and E54.
                 if (pcmInfo != null && pcmInfo.HardwareType != PcmType.P10 && pcmInfo.HardwareType != PcmType.P12 && pcmInfo.HardwareType != PcmType.E54)
                 {
                     var hardwareResponse = await this.Vehicle.QueryHardwareId();
-                    if (hardwareResponse.Status == ResponseStatus.Success)
-                    {
-                        this.AddUserMessage("Hardware ID: " + hardwareResponse.Value.ToString());
-                    }
-                    else
-                    {
-                        this.AddUserMessage("Hardware ID query failed: " + hardwareResponse.Status.ToString());
-                    }
+                    this.AddUserMessage("Hardware ID: " + hardwareResponse.ToString());
                 }
 
                 var serialResponse = await this.Vehicle.QuerySerial();
-                if (serialResponse.Status == ResponseStatus.Success)
-                {
-                    this.AddUserMessage("Serial Number: " + serialResponse.Value.ToString());
-                }
-                else
-                {
-                    this.AddUserMessage("Serial Number query failed: " + serialResponse.Status.ToString());
-                }
+                this.AddUserMessage("Serial Number: " + serialResponse.ToString());
 
                 // Disable BCC lookup for the P04
                 if (pcmInfo != null && pcmInfo.HardwareType != PcmType.P04 && pcmInfo.HardwareType != PcmType.P08)
                 {
                     var bccResponse = await this.Vehicle.QueryBCC();
-                    if (bccResponse.Status == ResponseStatus.Success)
-                    {
-                        this.AddUserMessage("Broad Cast Code: " + bccResponse.Value.ToString());
-                    }
-                    else
-                    {
-                        this.AddUserMessage("BCC query failed: " + bccResponse.Status.ToString());
-                    }
+                    this.AddUserMessage("Broad Cast Code: " + bccResponse.ToString());
                 }
 
                 var mecResponse = await this.Vehicle.QueryMEC();
-                if (mecResponse.Status == ResponseStatus.Success)
-                {
-                    this.AddUserMessage("MEC: " + mecResponse.Value.ToString());
-                }
-                else
-                {
-                    this.AddUserMessage("MEC query failed: " + mecResponse.Status.ToString());
-                }
+                this.AddUserMessage("MEC: " + mecResponse.ToString());
 
                 var voltageResponse = await this.Vehicle.QueryVoltage();
-                if (voltageResponse.Status == ResponseStatus.Success)
-                {
-                    this.AddUserMessage("Voltage: " + voltageResponse.Value.ToString());
-                }
-                else
-                {
-                    this.AddUserMessage("Voltage query failed: " + voltageResponse.Status.ToString());
-                }
+                this.AddUserMessage("Voltage: " + voltageResponse.ToString());
             }
             catch (Exception exception)
             {
@@ -904,6 +844,8 @@ namespace PcmHacking
             }
             finally
             {
+                await this.Vehicle.ExitKernel();
+
                 this.EnableUserInput();
             }
         }
@@ -915,24 +857,14 @@ namespace PcmHacking
         {
             try
             {
-                Response<uint> osidResponse = await this.Vehicle.QueryOperatingSystemId(CancellationToken.None);
-                if (osidResponse.Status != ResponseStatus.Success)
-                {
-                    this.AddUserMessage("Operating system query failed: " + osidResponse.Status);
-                    return;
-                }
+                uint osidResponse = await this.Vehicle.QueryOperatingSystemId(CancellationToken.None);
 
-                PcmInfo info = new PcmInfo(osidResponse.Value);
+                PcmInfo info = new PcmInfo(osidResponse);
 
                 var vinResponse = await this.Vehicle.QueryVin();
-                if (vinResponse.Status != ResponseStatus.Success)
-                {
-                    this.AddUserMessage("VIN query failed: " + vinResponse.Status.ToString());
-                    return;
-                }
 
                 DialogBoxes.VinForm vinForm = new DialogBoxes.VinForm();
-                vinForm.Vin = vinResponse.Value;
+                vinForm.Vin = vinResponse;
                 DialogResult dialogResult = vinForm.ShowDialog();
 
                 if (dialogResult == DialogResult.OK)
@@ -944,16 +876,10 @@ namespace PcmHacking
                         return;
                     }
 
-                    Response<bool> vinmodified = await this.Vehicle.UpdateVin(vinForm.Vin.Trim());
-                    if (vinmodified.Value)
-                    {
-                        this.AddUserMessage("VIN successfully updated to " + vinForm.Vin);
-                        MessageBox.Show("VIN updated to " + vinForm.Vin + " successfully.", "Good news.", MessageBoxButtons.OK);
-                    }
-                    else
-                    {
-                        MessageBox.Show("Unable to change the VIN to " + vinForm.Vin + ". Error: " + vinmodified.Status, "Bad news.", MessageBoxButtons.OK);
-                    }
+                    await this.Vehicle.UpdateVin(vinForm.Vin.Trim());
+
+                    this.AddUserMessage("VIN successfully updated to " + vinForm.Vin);
+                    MessageBox.Show("VIN updated to " + vinForm.Vin + " successfully.", "Good news.", MessageBoxButtons.OK);
                 }
             }
             catch (Exception exception)
@@ -1206,28 +1132,18 @@ namespace PcmHacking
 
                     this.cancellationTokenSource = new CancellationTokenSource();
 
-                    this.AddUserMessage("Querying operating system of current PCM.");
-                    Response<uint> osidResponse = await this.Vehicle.QueryOperatingSystemId(this.cancellationTokenSource.Token);
-                    if (osidResponse.Status != ResponseStatus.Success)
-                    {
-                        this.AddUserMessage("Operating system query failed, will retry: " + osidResponse.Status);
-                        await this.Vehicle.ExitKernel();
-
-                        osidResponse = await this.Vehicle.QueryOperatingSystemId(this.cancellationTokenSource.Token);
-                        if (osidResponse.Status != ResponseStatus.Success)
-                        {
-                            this.AddUserMessage("Operating system query failed: " + osidResponse.Status);
-                        }
-                    }
-
                     PcmInfo pcmInfo;
-                    if (osidResponse.Status == ResponseStatus.Success)
+
+                    try
                     {
+                        this.AddUserMessage("Querying operating system of current PCM.");
+                        uint osidResponse = await this.Vehicle.QueryOperatingSystemId(this.cancellationTokenSource.Token);
+
+                        pcmInfo = new PcmInfo(osidResponse);
                         // Look up the information about this PCM, based on the OSID;
-                        this.AddUserMessage("OSID: " + osidResponse.Value);
-                        pcmInfo = new PcmInfo(osidResponse.Value);
+                        this.AddUserMessage("OSID: " + osidResponse);
                     }
-                    else
+                    catch (ObdException)
                     {
                         this.AddUserMessage("Unable to get operating system ID. Will assume this can be unlocked with the default seed/key algorithm.");
 
@@ -1286,15 +1202,10 @@ namespace PcmHacking
                         pcmInfo,
                         this);
 
-                    Response<Stream> readResponse = await reader.ReadContents(cancellationTokenSource.Token);
-
+                    var readResponse = await reader.ReadContents(cancellationTokenSource.Token);
+                    
                     this.AddUserMessage("Elapsed time " + DateTime.Now.Subtract(start));
-                    if (readResponse.Status != ResponseStatus.Success)
-                    {
-                        this.AddUserMessage("Read failed, " + readResponse.Status.ToString());
-                        return;
-                    }
-
+                    
                     // This will suppress the scary warnings prior to writing.
                     Configuration.Settings.ConnectionVerified = true;
 
@@ -1306,11 +1217,11 @@ namespace PcmHacking
                         {
                             this.AddUserMessage("Saving contents to " + path);
 
-                            readResponse.Value.Position = 0;
+                            readResponse.Position = 0;
 
                             using (Stream output = File.Open(path, FileMode.Create))
                             {
-                                await readResponse.Value.CopyToAsync(output);
+                                await readResponse.CopyToAsync(output);
                             }
 
                             success = true;
@@ -1335,6 +1246,8 @@ namespace PcmHacking
                 }
                 finally
                 {
+                    await this.Vehicle.ExitKernel();
+
                     this.Invoke((MethodInvoker)delegate ()
                     {
                         this.EnableUserInput();
@@ -1441,23 +1354,26 @@ namespace PcmHacking
                         (writeType != WriteType.OsPlusCalibrationPlusBoot) &&
                         (writeType != WriteType.Full) &&
                         (writeType != WriteType.TestWrite);
+                    uint osidResponse = 0;
 
                     this.AddUserMessage("Requesting operating system ID...");
-                    Response<uint> osidResponse = await this.Vehicle.QueryOperatingSystemId(this.cancellationTokenSource.Token);
-                    if (osidResponse.Status == ResponseStatus.Success)
+
+                    try
                     {
-                        pcmInfo = new PcmInfo(osidResponse.Value);
+                        osidResponse = await this.Vehicle.QueryOperatingSystemId(this.cancellationTokenSource.Token);
+
+                        pcmInfo = new PcmInfo(osidResponse);
                         keyAlgorithm = pcmInfo.KeyAlgorithm;
                         needUnlock = true;
 
-                        if (!validator.IsSameHardware(osidResponse.Value))
+                        if (!validator.IsSameHardware(osidResponse))
                         {
                             return;
                         }
 
-                        if (!validator.IsSameOperatingSystem(osidResponse.Value))
+                        if (!validator.IsSameOperatingSystem(osidResponse))
                         {
-                            Utility.ReportOperatingSystems(validator.GetOsidFromImage(), osidResponse.Value, writeType, this, out shouldHalt);
+                            Utility.ReportOperatingSystems(validator.GetOsidFromImage(), osidResponse, writeType, this, out shouldHalt);
                             if (shouldHalt)
                             {
                                 return;
@@ -1466,16 +1382,14 @@ namespace PcmHacking
 
                         needToCheckOperatingSystem = false;
                     }
-                    else
+                    catch (ObdException)
                     {
-                        if (this.cancellationTokenSource.Token.IsCancellationRequested)
-                        {
-                            return;
-                        }
+                        cancellationTokenSource.Token.ThrowIfCancellationRequested();
 
                         this.AddUserMessage("Operating system request failed, checking for a live kernel...");
 
                         kernelVersion = await this.Vehicle.GetKernelVersion();
+
                         if (kernelVersion == 0)
                         {
                             this.AddUserMessage("Checking for recovery mode...");
@@ -1492,6 +1406,7 @@ namespace PcmHacking
                                 this.AddUserMessage("Unlock may not work, but we'll try...");
                                 needUnlock = true;
                             }
+
                             pcmInfo = new PcmInfo(validator.GetOsidFromImage()); // Prevent Null Reference Exceptions from breaking Recovery Mode
                         }
                         else
@@ -1505,20 +1420,15 @@ namespace PcmHacking
                             if (needToCheckOperatingSystem)
                             {
                                 osidResponse = await this.Vehicle.QueryOperatingSystemIdFromKernel(this.cancellationTokenSource.Token);
-                                if (osidResponse.Status != ResponseStatus.Success)
-                                {
-                                    // The kernel seems broken. This shouldn't happen, but if it does, halt.
-                                    this.AddUserMessage("The kernel did not respond to operating system ID query.");
-                                    return;
-                                }
 
-                                Utility.ReportOperatingSystems(validator.GetOsidFromImage(), osidResponse.Value, writeType, this, out shouldHalt);
+                                Utility.ReportOperatingSystems(validator.GetOsidFromImage(), osidResponse, writeType, this, out shouldHalt);
+
                                 if (shouldHalt)
                                 {
                                     return;
                                 }
 
-                                pcmInfo = new PcmInfo(osidResponse.Value);
+                                pcmInfo = new PcmInfo(osidResponse);
                             }
 
                             needToCheckOperatingSystem = false;

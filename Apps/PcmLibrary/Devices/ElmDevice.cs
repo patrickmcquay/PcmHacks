@@ -49,81 +49,65 @@ namespace PcmHacking
         /// <summary>
         /// Use the related classes to discover which type of device is currently connected.
         /// </summary>
-        public override async Task<bool> Initialize()
+        public override async Task Initialize()
         {
-            try
+            this.Logger.AddDebugMessage("ElmDevice initialization starting.");
+
+            SerialPortConfiguration configuration = new SerialPortConfiguration();
+            configuration.BaudRate = 115200;
+            configuration.Timeout = 1200;
+
+            await this.Port.OpenAsync(configuration);
+            await this.Port.DiscardBuffers();
+
+            await this.SharedInitialization();
+
+            AllProDeviceImplementation allProDevice = new AllProDeviceImplementation(
+                this.Enqueue, 
+                () => this.ReceivedMessageCount,
+                this.Port, 
+                this.Logger);
+
+            if (await allProDevice.Initialize())
             {
-                this.Logger.AddDebugMessage("ElmDevice initialization starting.");
-
-                SerialPortConfiguration configuration = new SerialPortConfiguration();
-                configuration.BaudRate = 115200;
-                configuration.Timeout = 1200;
-
-                await this.Port.OpenAsync(configuration);
-                await this.Port.DiscardBuffers();
-
-                if (!await this.SharedInitialization())
-                {
-                    return false;
-                }
-
-                AllProDeviceImplementation allProDevice = new AllProDeviceImplementation(
-                    this.Enqueue, 
+                this.implementation = allProDevice;
+            }
+            else
+            {
+                ScanToolDeviceImplementation scanToolDevice = new ScanToolDeviceImplementation(
+                    this.Enqueue,
                     () => this.ReceivedMessageCount,
-                    this.Port, 
+                    this.Port,
                     this.Logger);
 
-                if (await allProDevice.Initialize())
+                if (await scanToolDevice.Initialize())
                 {
-                    this.implementation = allProDevice;
+                    this.implementation = scanToolDevice;
                 }
-                else
-                {
-                    ScanToolDeviceImplementation scanToolDevice = new ScanToolDeviceImplementation(
-                        this.Enqueue,
-                        () => this.ReceivedMessageCount,
-                        this.Port,
-                        this.Logger);
-
-                    if (await scanToolDevice.Initialize())
-                    {
-                        this.implementation = scanToolDevice;
-                    }
-                }
-
-                // These are shared by all ELM-based devices.
-                if (!await this.implementation.SendAndVerify("AT AL", "OK") ||               // Allow Long packets
-                    !await this.implementation.SendAndVerify("AT SP2", "OK") ||              // Set Protocol 2 (VPW)
-                    !await this.implementation.SendAndVerify("AT DP", "SAE J1850 VPW") ||    // Get Protocol (Verify VPW)
-                    !await this.implementation.SendAndVerify("AT AR", "OK") ||               // Turn Auto Receive on (default should be on anyway)
-                    !await this.implementation.SendAndVerify("AT AT0", "OK") ||              // Disable adaptive timeouts
-                    !await this.implementation.SendAndVerify("AT SR " + DeviceId.Tool.ToString("X2"), "OK") || // Set receive filter to this tool ID
-                    !await this.implementation.SendAndVerify("AT H1", "OK") ||               // Send headers
-                    !await this.implementation.SendAndVerify("AT ST 20", "OK")               // Set timeout (will be adjusted later, too)                 
-                    )
-                {
-                    return false;
-                }
-
-                this.MaxSendSize = this.implementation.MaxSendSize;
-                this.MaxReceiveSize = this.implementation.MaxReceiveSize;
-                this.Supports4X = this.implementation.Supports4X;
-                this.SupportsStreamLogging = this.implementation.SupportsStreamLogging;
-                return true;
             }
-            catch (Exception exception)
-            {
-                this.Logger.AddUserMessage("Unable to initalize " + this.ToString());
-                this.Logger.AddDebugMessage(exception.ToString());
-                return false;
-            }
+
+            // These are shared by all ELM-based devices.
+            await this.implementation.SendAndVerify("AT AL", "OK"); // Allow Long packets
+            await this.implementation.SendAndVerify("AT SP2", "OK"); // Set Protocol 2 (VPW)
+            await this.implementation.SendAndVerify("AT DP", "SAE J1850 VPW"); // Get Protocol (Verify VPW)
+            await this.implementation.SendAndVerify("AT AR", "OK"); // Turn Auto Receive on (default should be on anyway)
+            await this.implementation.SendAndVerify("AT AT0", "OK"); // Disable adaptive timeouts
+            await this.implementation.SendAndVerify("AT SR " + DeviceId.Tool.ToString("X2"), "OK"); // Set receive filter to this tool ID
+            await this.implementation.SendAndVerify("AT H1", "OK"); // Send headers
+            await this.implementation.SendAndVerify("AT ST 20", "OK"); // Set timeout (will be adjusted later, too)                 
+
+            this.MaxSendSize = this.implementation.MaxSendSize;
+            this.MaxReceiveSize = this.implementation.MaxReceiveSize;
+            this.Supports4X = this.implementation.Supports4X;
+            this.SupportsStreamLogging = this.implementation.SupportsStreamLogging;
         }
 
-        private async Task<bool> SharedInitialization()
+        private async Task SharedInitialization()
         {
             // This will only be used for device-independent initialization.
             ElmDeviceImplementation sharedImplementation = new ElmDeviceImplementation(null, null, this.Port, this.Logger);
-            return await sharedImplementation.Initialize();
+            
+            await sharedImplementation.Initialize();
         }
 
         /// <summary>
@@ -171,9 +155,9 @@ namespace PcmHacking
         /// <summary>
         /// Send a message, do not expect a response.
         /// </summary>
-        public override async Task<bool> SendMessage(Message message)
+        public override async Task SendMessage(Message message)
         {
-            return await this.implementation.SendMessage(message);
+            await this.implementation.SendMessage(message);
         }
 
         /// <summary>
@@ -191,22 +175,18 @@ namespace PcmHacking
         /// <remarks>
         /// The caller must also tell the PCM to switch speeds
         /// </remarks>
-        protected override async Task<bool> SetVpwSpeedInternal(VpwSpeed newSpeed)
+        protected override async Task SetVpwSpeedInternal(VpwSpeed newSpeed)
         {
             if (newSpeed == VpwSpeed.Standard)
             {
                 this.Logger.AddDebugMessage("AllPro setting VPW 1X");
-                if (!await this.implementation.SendAndVerify("AT VPW1", "OK"))
-                    return false;
+                await this.implementation.SendAndVerify("AT VPW1", "OK");
             }
             else
             {
                 this.Logger.AddDebugMessage("AllPro setting VPW 4X");
-                if (!await this.implementation.SendAndVerify("AT VPW4", "OK"))
-                    return false;
+                await this.implementation.SendAndVerify("AT VPW4", "OK");
             }
-
-            return true;
         }
 
         /// <summary>

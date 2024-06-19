@@ -48,29 +48,17 @@ namespace PcmHacking
         /// Writes a block of data to the PCM
         /// Requires an unlocked PCM
         /// </summary>
-        private async Task<Response<bool>> WriteBlock(byte block, byte[] data)
+        private async Task WriteBlock(byte block, byte[] data)
         {
-            Message m;
-            Message ok = new Message(new byte[] { Priority.Physical0, DeviceId.Tool, DeviceId.Pcm, 0x7B, block });
-
-            switch (data.Length)
+            if (data.Length != 6)
             {
-                case 6:
-                    m = new Message(new byte[] { Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, 0x3B, block, data[0], data[1], data[2], data[3], data[4], data[5] });
-                    break;
-                default:
-                    logger.AddDebugMessage("Cant write block size " + data.Length);
-                    return Response.Create(ResponseStatus.Error, false);
+                throw new ObdException("Cant write block size " + data.Length, ObdExceptionReason.Error);
             }
 
-            if (!await this.device.SendMessage(m))
-            {
-                logger.AddUserMessage("Failed to write block " + block + ", communications failure");
-                return Response.Create(ResponseStatus.Error, false);
-            }
+            Message m = new Message(new byte[] { Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, 0x3B, block, data[0], data[1], data[2], data[3], data[4], data[5] });
+            await this.device.SendMessage(m);
 
             logger.AddDebugMessage("Successful write to block " + block);
-            return Response.Create(ResponseStatus.Success, true);
         }
 
         /// <summary>
@@ -181,7 +169,7 @@ namespace PcmHacking
         /// Query the PCM's operating system ID.
         /// </summary>
         /// <returns></returns>
-        public async Task<Response<UInt32>> QueryOperatingSystemIdFromKernel(CancellationToken cancellationToken)
+        public async Task<UInt32> QueryOperatingSystemIdFromKernel(CancellationToken cancellationToken)
         {
             await this.device.SetTimeout(TimeoutScenario.ReadProperty);
 
@@ -201,26 +189,25 @@ namespace PcmHacking
             for (int retries = 0; retries < 3; retries++)
             {
                 await this.SetDeviceTimeout(TimeoutScenario.ReadProperty);
+
                 Query<UInt32> chipIdQuery = this.CreateQuery<UInt32>(
                     this.protocol.CreateFlashMemoryTypeQuery,
                     this.protocol.ParseFlashMemoryType,
                     cancellationToken);
-                Response<UInt32> chipIdResponse = await chipIdQuery.Execute();
+                
 
-                if (chipIdResponse.Status != ResponseStatus.Success)
+                UInt32 chipIdResponse = await chipIdQuery.Execute();
+
+                if (chipIdResponse == 0)
                 {
                     continue;
                 }
 
-                if (chipIdResponse.Value == 0)
-                {
-                    continue;
-                }
-
-                return chipIdResponse.Value;
+                return chipIdResponse;
             }
 
             logger.AddUserMessage("Unable to determine which flash chip is in this PCM");
+
             return 0;
         }
 
@@ -231,13 +218,10 @@ namespace PcmHacking
         public async Task<UInt32> GetKernelVersion()
         {
             Message query = this.protocol.CreateKernelVersionQuery();
+
             for (int retryCount = 0; retryCount < 5; retryCount++)
             {
-                if (!await this.device.SendMessage(query))
-                {
-                    await Task.Delay(100);
-                    continue;
-                }
+                await this.device.SendMessage(query);
 
                 Message reply = await this.device.ReceiveMessage();
                 if (reply == null)
@@ -246,15 +230,10 @@ namespace PcmHacking
                     continue;
                 }
 
-                Response<UInt32> response = this.protocol.ParseKernelVersion(reply);
-                if ((response.Status == ResponseStatus.Success) && (response.Value != 0))
+                var response = this.protocol.ParseKernelVersion(reply);
+                if (response != 0)
                 {
-                    return response.Value;
-                }
-
-                if (response.Status == ResponseStatus.Refused)
-                {
-                    return 0;
+                    return response;
                 }
 
                 await Task.Delay(100);
@@ -268,18 +247,17 @@ namespace PcmHacking
         /// </summary>
         public async Task<bool> PCMExecute(PcmInfo info, byte[] payload, CancellationToken cancellationToken)
         {
+            var loaderType = info.LoaderRequired ? "loader" : "kernel";
+
             // Note that we request an upload of 4k maximum, because the PCM will reject anything bigger.
             // But you can request a 4k upload and then send up to 16k if you want, and the PCM will not object.
             int claimedSize = Math.Min(4096, payload.Length);
 
             // Since we're going to lie about the size, we need to check for overflow ourselves.
-            if (info.HardwareType == PcmType.P01_P59)
+            if (info.HardwareType == PcmType.P01_P59 && info.KernelBaseAddress + payload.Length > 0xFFCDFF)
             {
-                if (info.KernelBaseAddress + payload.Length > 0xFFCDFF)
-                {
-                    logger.AddUserMessage("Base address and size would exceed usable RAM.");
-                    return false;
-                }
+                logger.AddUserMessage("Base address and size would exceed usable RAM.");
+                return false;
             }
 
             int loadAddress;
@@ -294,31 +272,23 @@ namespace PcmHacking
                 loadAddress = info.KernelBaseAddress;
             }
 
-            logger.AddDebugMessage($"Sending upload request for {(info.LoaderRequired ? "loader" : "kernel")} size {payload.Length}, loadaddress {loadAddress.ToString("X6")}");
+            logger.AddDebugMessage($"Sending upload request for {loaderType} size {payload.Length}, loadaddress {loadAddress:X6}");
 
             Query<bool> uploadPermissionQuery = new Query<bool>(
                 this.device,
                 () => protocol.CreateUploadRequest(info, claimedSize),
-                (message) => protocol.ParseUploadPermissionResponse(info, message),
+                (message) => protocol.IsUploadPermissionResponseValid(info, message),
                 this.logger,
                 cancellationToken,
                 this.notifier);
 
-            Response<bool> permissionResponse = await uploadPermissionQuery.Execute();
-            bool uploadAllowed = permissionResponse.Status == ResponseStatus.Success && permissionResponse.Value;
-
-            if (!uploadAllowed)
+            if (!await uploadPermissionQuery.Execute())
             {
-                logger.AddUserMessage(
-                    $"Permission to upload {(info.LoaderRequired ? "Loader" : "Kernel")} was denied." +
-                    Environment.NewLine +
-                    "If this persists, try cutting power to the PCM, restoring power, waiting ten seconds, and trying again."
-                    );
-                return false;
+                throw new ObdException($"Permission to upload {loaderType} was denied. {Environment.NewLine} If this persists, try cutting power to the PCM, restoring power, waiting ten seconds, and trying again.", ObdExceptionReason.Refused);
             }
 
             logger.AddUserMessage("Upload permission granted.");
-            logger.AddDebugMessage($"Going to load a {payload.Length} byte {(info.LoaderRequired ? "loader" : "kernel")} to 0x{loadAddress.ToString("X6")}");
+            logger.AddDebugMessage($"Going to load a {payload.Length} byte {loaderType} to 0x{loadAddress.ToString("X6")}");
 
             await this.device.SetTimeout(TimeoutScenario.SendKernel);
 
@@ -345,12 +315,8 @@ namespace PcmHacking
                 remainder == payload.Length ? BlockCopyType.Execute : BlockCopyType.Copy);
 
             await notifier.Notify();
-            Response<bool> uploadResponse = await WritePayload(remainderMessage, cancellationToken);
-            if (uploadResponse.Status != ResponseStatus.Success)
-            {
-                logger.AddDebugMessage($"Could not upload {(info.LoaderRequired ? "loader" : "kernel")} to PCM, remainder payload not accepted.");
-                return false;
-            }
+
+            await WritePayload(info, remainderMessage, cancellationToken);
 
             // Now we send a series of full upload packets
             // Note that there's a notifier.Notify() call inside the WritePayload() call in this loop.
@@ -359,7 +325,7 @@ namespace PcmHacking
                 int bytesSent = payload.Length - offset;
                 int percentDone = bytesSent * 100 / payload.Length;
 
-                this.logger.AddUserMessage($"{(info.LoaderRequired ? "Loader" : "Kernel")} upload {percentDone}% complete.");
+                this.logger.AddUserMessage($"{loaderType} upload {percentDone}% complete.");
 
                 if (cancellationToken.IsCancellationRequested)
                 {
@@ -378,15 +344,10 @@ namespace PcmHacking
 
                 logger.AddDebugMessage($"Sending block with offset 0x{offset:X6}, start address 0x{startAddress:X6}, length 0x{payloadSize:X4}.");
 
-                uploadResponse = await WritePayload(payloadMessage, cancellationToken);
-                if (uploadResponse.Status != ResponseStatus.Success)
-                {
-                    logger.AddDebugMessage($"Could not upload {(info.LoaderRequired ? "loader" : "kernel")} to PCM, payload not accepted.");
-                    return false;
-                }
+                await WritePayload(info, payloadMessage, cancellationToken);
             }
 
-            this.logger.AddUserMessage($"{(info.LoaderRequired ? "Loader" : "Kernel")} upload 100% complete.");
+            this.logger.AddUserMessage($"{loaderType} upload 100% complete.");
 
             if (ReportKernelID && info.KernelVersionSupport)
             {
@@ -395,10 +356,10 @@ namespace PcmHacking
                 UInt32 kernelVersion = await this.GetKernelVersion();
                 if (kernelVersion == 0)
                 {
-                    this.logger.AddUserMessage($"{(info.LoaderRequired ? "Loader" : "Kernel")} failed to start.");
+                    this.logger.AddUserMessage($"{loaderType} failed to start.");
                     return false;
                 }
-                this.logger.AddUserMessage($"{(info.LoaderRequired ? "Loader" : "Kernel")} Version: {kernelVersion.ToString("X8")}");
+                this.logger.AddUserMessage($"{loaderType} Version: {kernelVersion.ToString("X8")}");
 
                 // Detect an Assemply Kernel, // Remove with the C Kernels
                 if (kernelVersion > 0x82400000)
@@ -420,88 +381,67 @@ namespace PcmHacking
         /// <summary>
         /// Does everything required to switch to VPW 4x
         /// </summary>
-        public async Task<bool> VehicleSetVPW4x(VpwSpeed newSpeed)
+        public async Task VehicleSetVPW4x()
         {
             if (!device.Supports4X) 
             {
-                if (newSpeed == VpwSpeed.FourX)
-                {
-                    // where there is no support only report no switch to 4x
-                    logger.AddUserMessage("This interface does not support VPW 4x");
-                }
-                return true;
+                throw new ObdException("This device does not support 4X mode.", ObdExceptionReason.Error);
             }
 
-            if ((newSpeed == VpwSpeed.FourX) && !this.device.Enable4xReadWrite)
+            if (!this.device.Enable4xReadWrite)
             {
-                logger.AddUserMessage("4X communications disabled by configuration.");
-                return true;
+                throw new ObdException("4X communications disabled by configuration.", ObdExceptionReason.Error);
             }
 
             // Configure the vehicle bus when switching to 4x
-            if (newSpeed == VpwSpeed.FourX)
+            logger.AddUserMessage("Attempting switch to VPW 4x");
+            await device.SetTimeout(TimeoutScenario.ReadProperty);
+
+            // The list of modules may not be useful after all, but 
+            // checking for an empty list indicates an uncooperative
+            // module on the VPW bus.
+            List<byte> modules = await this.RequestHighSpeedPermission(notifier);
+            if (modules == null)
             {
-                logger.AddUserMessage("Attempting switch to VPW 4x");
-                await device.SetTimeout(TimeoutScenario.ReadProperty);
-
-                // The list of modules may not be useful after all, but 
-                // checking for an empty list indicates an uncooperative
-                // module on the VPW bus.
-                List<byte> modules = await this.RequestHighSpeedPermission(notifier);
-                if (modules == null)
-                {
-                    // A device has refused the switch to high speed mode.
-                    return false;
-                }
-
-                // Since we had some issue with other modules not staying quiet...
-                await this.ForceSendToolPresentNotification();
-
-                Message broadcast = this.protocol.CreateBeginHighSpeed(DeviceId.Broadcast);
-                await this.device.SendMessage(broadcast);
-
-                // Check for any devices that refused to switch to 4X speed.
-                // These responses usually get lost, so this code might be pointless.
-                Stopwatch sw = new Stopwatch();
-                sw.Start();
-                Message response = null;
-
-                // WARNING: The AllPro stopped receiving permission-to-upload messages when this timeout period
-                // was set to 1500ms.  Reducing it to 500 seems to have fixed that problem. 
-                // 
-                // It would be nice to find a way to wait equally long with all devices, as refusal messages
-                // are still a potetial source of trouble. 
-                while (((response = await this.device.ReceiveMessage()) != null) && (sw.ElapsedMilliseconds < 500))
-                {
-                    Response<bool> refused = this.protocol.ParseHighSpeedRefusal(response);
-                    if (refused.Status != ResponseStatus.Success)
-                    {
-                        // This should help ELM devices receive responses.
-                        await Task.Delay(100);
-                        await notifier.ForceNotify();
-                        continue;
-                    }
-
-                    if (refused.Value == false)
-                    {
-                        // TODO: Add module number.
-                        this.logger.AddUserMessage("Module refused high-speed switch.");
-                        return false;
-                    }
-                }
+                // A device has refused the switch to high speed mode.
+                throw new ObdException("A device has refused the switch to high speed mode.", ObdExceptionReason.Error);
             }
-            else
-            {
-                logger.AddUserMessage("Reverting to VPW 1x");
-            }
-
-            // Request the device to change
-            await device.SetVpwSpeed(newSpeed);
 
             // Since we had some issue with other modules not staying quiet...
             await this.ForceSendToolPresentNotification();
 
-            return true;
+            Message broadcast = this.protocol.CreateBeginHighSpeed(DeviceId.Broadcast);
+            await this.device.SendMessage(broadcast);
+
+            // Check for any devices that refused to switch to 4X speed.
+            // These responses usually get lost, so this code might be pointless.
+            Stopwatch sw = new Stopwatch();
+            sw.Start();
+            Message response = null;
+
+            // WARNING: The AllPro stopped receiving permission-to-upload messages when this timeout period
+            // was set to 1500ms.  Reducing it to 500 seems to have fixed that problem. 
+            // 
+            // It would be nice to find a way to wait equally long with all devices, as refusal messages
+            // are still a potetial source of trouble. 
+            while (((response = await this.device.ReceiveMessage()) != null) && (sw.ElapsedMilliseconds < 500))
+            {
+                if (this.protocol.ParseHighSpeedRefusal(response))
+                {
+                    // TODO: Add module number.
+                    throw new ObdException("Module refused high-speed switch.", ObdExceptionReason.Error);
+                }
+
+                // This should help ELM devices receive responses.
+                await Task.Delay(100);
+                await notifier.ForceNotify();
+            }
+
+            // Request the device to change
+            await device.SetVpwSpeed(VpwSpeed.FourX);
+
+            // Since we had some issue with other modules not staying quiet...
+            await this.ForceSendToolPresentNotification();
         }
 
         /// <summary>
@@ -555,38 +495,30 @@ namespace PcmHacking
         /// <summary>
         /// Sends the provided message, with a retry loop. 
         /// </summary>
-        public async Task<Response<bool>> WritePayload(Message message, CancellationToken cancellationToken)
+        public async Task<int> WritePayload(PcmInfo info, Message message, CancellationToken cancellationToken)
         {
-            int retryCount = 0;
-            for (; retryCount < MaxSendAttempts; retryCount++)
+            for (int retryCount = 0; retryCount < MaxSendAttempts; retryCount++)
             {
                 await this.notifier.Notify();
 
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    return Response.Create(ResponseStatus.Cancelled, false, retryCount);
-                }
+                cancellationToken.ThrowIfCancellationRequested();
 
                 await Task.Delay(50); // Allow the running kernel time to enter the ReadMessage function
 
-                if (!await device.SendMessage(message))
-                {
-                    this.logger.AddDebugMessage("WritePayload: Unable to send message.");
-                    continue;
-                }
+                await device.SendMessage(message);
 
-                if (await WaitForSuccess(this.protocol.ParseUploadResponse, cancellationToken))
+                if (await WaitForSuccess((msg) => protocol.ValidateUploadResponse(info, msg), cancellationToken))
                 {
-                    return Response.Create(ResponseStatus.Success, true, retryCount);
+                    return retryCount;
                 }
 
                 this.logger.AddDebugMessage("WritePayload: Upload request failed.");
+
                 await Task.Delay(100);
                 await this.SendToolPresentNotification();
             }
 
-            this.logger.AddDebugMessage("WritePayload: Giving up.");
-            return Response.Create(ResponseStatus.Error, false, retryCount);
+            throw new ObdException($"WritePayload: Giving up. Attempted to write {MaxSendAttempts} time(s).", ObdExceptionReason.Error);
         }
     }
 }

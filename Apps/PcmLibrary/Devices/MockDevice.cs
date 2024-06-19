@@ -41,7 +41,7 @@ namespace PcmHacking
         /// <summary>
         /// Initialize the device. It's just a no-op for this device type.
         /// </summary>
-        public override Task<bool> Initialize()
+        public override Task Initialize()
         {
             return Task.FromResult(true);
         }
@@ -57,7 +57,7 @@ namespace PcmHacking
         /// <summary>
         /// Send a message, do not expect a response.
         /// </summary>
-        public override Task<bool> SendMessage(Message message)
+        public override Task SendMessage(Message message)
         {
             Thread.Sleep(100);
 
@@ -94,7 +94,7 @@ namespace PcmHacking
         /// <remarks>
         /// The caller must also tell the PCM to switch speeds
         /// </remarks>
-        protected override Task<bool> SetVpwSpeedInternal(VpwSpeed newSpeed)
+        protected override Task SetVpwSpeedInternal(VpwSpeed newSpeed)
         {
             Thread.Sleep(100);
 
